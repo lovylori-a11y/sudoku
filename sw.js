@@ -1,5 +1,5 @@
 // 小數獨 service worker — 離線快取
-const CACHE = 'sudoku-v2';
+const CACHE = 'sudoku-v3';
 const ASSETS = [
   './',
   './index.html',

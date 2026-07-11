@@ -280,11 +280,12 @@ body{
 <script>
 "use strict";
 /* ============ 資料 ============ */
+// tier=允許用到的最高階人類技巧(1=只單元素;2=區塊排除+數對等)；floor=挖到剩幾格提示就停
 const DIFFS=[
-  {key:'easy',   name:'簡單', clues:45, sub:'給空多、好上手', color:'#22c55e'},
-  {key:'medium', name:'中等', clues:36, sub:'需要一點推理',   color:'#3b82f6'},
-  {key:'hard',   name:'困難', clues:30, sub:'要動點腦',       color:'#f59e0b'},
-  {key:'expert', name:'專家', clues:25, sub:'高手挑戰',       color:'#ef4444'},
+  {key:'easy',   name:'簡單', tier:1, floor:44, sub:'掃描就能解',   color:'#22c55e'},
+  {key:'medium', name:'中等', tier:1, floor:34, sub:'需要一點推理', color:'#3b82f6'},
+  {key:'hard',   name:'困難', tier:2, floor:30, sub:'要動點腦',     color:'#f59e0b'},
+  {key:'expert', name:'專家', tier:2, floor:24, sub:'高手挑戰',     color:'#ef4444'},
 ];
 const LEVELS_BATCH=30;           // 一次顯示幾關（按「更多」再加）
 const LS={prog:'sudoku.progress.v1', cur:'sudoku.current.v1', set:'sudoku.settings.v1', ip:'sudoku.inprogress.v1'};
@@ -326,21 +327,92 @@ function countSolutions(b,limit){
   for(const n of bestC){b[best]=n;count+=countSolutions(b,limit);b[best]=0;if(count>=limit)break;}
   return count;
 }
+/* ---- 人類技巧解題器：只用人會用的推理，不准試誤 ----
+   用來保證題目「不靠猜、純邏輯就能解開」。
+   tier 1 = 只用單元素(naked/hidden single)；tier 2 = 再加 區塊排除 + 數對/數三/隱數對 */
+const UNITS=(()=>{const u=[];
+  for(let r=0;r<9;r++){const a=[];for(let c=0;c<9;c++)a.push(r*9+c);u.push(a);}
+  for(let c=0;c<9;c++){const a=[];for(let r=0;r<9;r++)a.push(r*9+c);u.push(a);}
+  for(let br=0;br<3;br++)for(let bc=0;bc<3;bc++){const a=[];
+    for(let i=0;i<3;i++)for(let j=0;j<3;j++)a.push((br*3+i)*9+(bc*3+j));u.push(a);}
+  return u;})();
+const PEERS=(()=>{const P=[];for(let p=0;p<81;p++){const s=new Set();
+  const r=(p/9|0),c=p%9,br=(r/3|0)*3,bc=(c/3|0)*3;
+  for(let i=0;i<9;i++){s.add(r*9+i);s.add(i*9+c);}
+  for(let i=0;i<3;i++)for(let j=0;j<3;j++)s.add((br+i)*9+(bc+j));
+  s.delete(p);P.push([...s]);}return P;})();
+const _pc=m=>{let n=0;while(m){m&=m-1;n++;}return n;};
+const _bit=n=>1<<(n-1);
+function humanSolve(puzzle,tier){
+  const val=puzzle.slice(),cand=new Array(81).fill(0);
+  for(let p=0;p<81;p++)if(val[p]===0){let m=0;for(let n=1;n<=9;n++)if(valid(val,p,n))m|=_bit(n);cand[p]=m;}
+  const place=(p,n)=>{val[p]=n;cand[p]=0;for(const q of PEERS[p])cand[q]&=~_bit(n);};
+  let prog=true;
+  while(prog){
+    prog=false;
+    for(let p=0;p<81;p++)if(val[p]===0&&_pc(cand[p])===1){place(p,Math.log2(cand[p])+1);prog=true;}
+    if(prog)continue;
+    for(const u of UNITS)for(let n=1;n<=9;n++){const b=_bit(n);let w=-1,c=0;
+      for(const p of u)if(val[p]===0&&(cand[p]&b)){w=p;c++;}
+      if(c===1){place(w,n);prog=true;}}
+    if(prog)continue;
+    if(tier<2)break;
+    // 區塊排除（pointing）：宮內某數只落在同一行/列 → 清掉該行/列宮外的
+    for(let bi=18;bi<27;bi++){const box=UNITS[bi];
+      for(let n=1;n<=9;n++){const b=_bit(n);const cs=box.filter(p=>val[p]===0&&(cand[p]&b));
+        if(cs.length<2)continue;
+        const rs=new Set(cs.map(p=>(p/9|0))),cols=new Set(cs.map(p=>p%9));
+        if(rs.size===1){const r=[...rs][0];for(let c=0;c<9;c++){const q=r*9+c;
+          if(!box.includes(q)&&(cand[q]&b)){cand[q]&=~b;prog=true;}}}
+        if(cols.size===1){const c=[...cols][0];for(let r=0;r<9;r++){const q=r*9+c;
+          if(!box.includes(q)&&(cand[q]&b)){cand[q]&=~b;prog=true;}}}}}
+    if(prog)continue;
+    // claiming：行/列內某數只落在同一宮 → 清掉該宮其餘
+    for(let ui=0;ui<18;ui++){const u=UNITS[ui];
+      for(let n=1;n<=9;n++){const b=_bit(n);const cs=u.filter(p=>val[p]===0&&(cand[p]&b));
+        if(cs.length<2)continue;
+        const bx=new Set(cs.map(p=>{const r=(p/9|0),c=p%9;return (r/3|0)*3+(c/3|0);}));
+        if(bx.size===1){const box=UNITS[18+[...bx][0]];
+          for(const q of box)if(!u.includes(q)&&val[q]===0&&(cand[q]&b)){cand[q]&=~b;prog=true;}}}}
+    if(prog)continue;
+    // 裸數對 / 裸數三
+    for(const u of UNITS){const em=u.filter(p=>val[p]===0);
+      for(let i=0;i<em.length&&!prog;i++)for(let j=i+1;j<em.length;j++){
+        const m=cand[em[i]]|cand[em[j]];
+        if(_pc(cand[em[i]])<=2&&_pc(cand[em[j]])<=2&&_pc(m)===2){
+          for(const p of em)if(p!==em[i]&&p!==em[j]&&(cand[p]&m)){cand[p]&=~m;prog=true;}}}
+      if(prog)break;
+      for(let i=0;i<em.length&&!prog;i++)for(let j=i+1;j<em.length;j++)for(let k=j+1;k<em.length;k++){
+        const m=cand[em[i]]|cand[em[j]]|cand[em[k]];
+        if(_pc(m)===3){for(const p of em)if(p!==em[i]&&p!==em[j]&&p!==em[k]&&(cand[p]&m)){cand[p]&=~m;prog=true;}}}
+      if(prog)break;}
+    if(prog)continue;
+    // 隱數對
+    for(const u of UNITS){for(let a=1;a<=9&&!prog;a++)for(let bb=a+1;bb<=9;bb++){
+      const ba=_bit(a),b2=_bit(bb);
+      const ca=u.filter(p=>val[p]===0&&(cand[p]&ba)),cb=u.filter(p=>val[p]===0&&(cand[p]&b2));
+      if(ca.length===2&&cb.length===2&&ca[0]===cb[0]&&ca[1]===cb[1]){
+        const keep=ba|b2;for(const p of ca)if(cand[p]&~keep){cand[p]&=keep;prog=true;}}}
+      if(prog)break;}
+  }
+  return val.every(x=>x!==0);
+}
 function generate(di,seedNum){
   const rng=mulberry32(seedNum);
   const solution=new Array(81).fill(0);
   solveFull(solution,rng);
   const puzzle=solution.slice();
-  const target=DIFFS[di].clues;
+  const {tier,floor}=DIFFS[di];
   const order=shuffle([...Array(81).keys()],rng);
   let clues=81;
   for(const pos of order){
-    if(clues<=target)break;
+    if(clues<=floor)break;
     const bak=puzzle[pos];
     if(bak===0)continue;
     puzzle[pos]=0;
     const test=puzzle.slice();
-    if(countSolutions(test,2)!==1){puzzle[pos]=bak;}else{clues--;}
+    // 唯一解 且 純邏輯(該難度技巧範圍內)可解，才真的挖掉
+    if(countSolutions(test,2)!==1||!humanSolve(puzzle,tier)){puzzle[pos]=bak;}else{clues--;}
   }
   return {puzzle,solution};
 }
