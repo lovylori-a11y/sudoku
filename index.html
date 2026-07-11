@@ -79,6 +79,10 @@ body{
   color:var(--ink);font-size:16px;font-weight:700;font-family:inherit;cursor:pointer;box-shadow:var(--shadow);
   display:flex;flex-direction:column;align-items:center;justify-content:center;}
 .lv.done{background:var(--accent);color:#fff;}
+.lv.inprog{background:#fff7ed;color:#9a3412;box-shadow:inset 0 0 0 2px #f59e0b,var(--shadow);}
+@media (prefers-color-scheme:dark){.lv.inprog{background:#3a2a12;color:#fbbf24;}}
+:root[data-theme="dark"] .lv.inprog{background:#3a2a12;color:#fbbf24;}
+:root[data-theme="light"] .lv.inprog{background:#fff7ed;color:#9a3412;}
 .lv .tm{font-size:9px;font-weight:600;opacity:.85;margin-top:2px;}
 .lv .chk{position:absolute;top:4px;right:6px;font-size:10px;}
 .more{grid-column:1/-1;border:0;background:transparent;color:var(--accent);font-weight:700;
@@ -210,6 +214,7 @@ body{
     <div class="gbar">
       <button class="iconbtn" id="backBtn">‹</button>
       <div class="gtitle"><div class="a" id="gTitle">簡單</div><div class="b" id="gSub">第 1 關</div></div>
+      <button class="iconbtn" id="restartBtn" title="重來這一關">↻</button>
       <div class="stat"><div class="a" id="gTimer">0:00</div><div class="b" id="gMist">錯誤 0</div></div>
     </div>
     <div class="board-wrap">
@@ -282,7 +287,7 @@ const DIFFS=[
   {key:'expert', name:'專家', clues:25, sub:'高手挑戰',       color:'#ef4444'},
 ];
 const LEVELS_BATCH=30;           // 一次顯示幾關（按「更多」再加）
-const LS={prog:'sudoku.progress.v1', cur:'sudoku.current.v1', set:'sudoku.settings.v1'};
+const LS={prog:'sudoku.progress.v1', cur:'sudoku.current.v1', set:'sudoku.settings.v1', ip:'sudoku.inprogress.v1'};
 
 /* ============ 亂數（可重現，關卡靠 seed 固定） ============ */
 function mulberry32(seed){let a=seed>>>0;return function(){a|=0;a=a+0x6D2B79F5|0;
@@ -346,21 +351,42 @@ let curDiff=0, curTab='levels', shownLevels=LEVELS_BATCH;
 let timerId=null;
 let settings={showErr:true,autoNote:true,limitMist:false};
 let progress={}; // {di:{lv:{time,mist}}}
+let inProgress={}; // {"di:lv":存檔快照} —— 每一關各自的「玩到一半」進度
 
 /* ============ 儲存 ============ */
 function loadStore(){
   try{progress=JSON.parse(localStorage.getItem(LS.prog))||{};}catch(e){progress={};}
+  try{inProgress=JSON.parse(localStorage.getItem(LS.ip))||{};}catch(e){inProgress={};}
   try{const s=JSON.parse(localStorage.getItem(LS.set));if(s)settings={...settings,...s};}catch(e){}
 }
 function saveProgress(){localStorage.setItem(LS.prog,JSON.stringify(progress));}
 function saveSettings(){localStorage.setItem(LS.set,JSON.stringify(settings));}
-function saveCurrent(){
-  if(!S||S.done){localStorage.removeItem(LS.cur);return;}
-  localStorage.setItem(LS.cur,JSON.stringify({
-    di:S.di,level:S.level,mode:S.mode,seed:S.seed,
+function persistIP(){localStorage.setItem(LS.ip,JSON.stringify(inProgress));}
+function lvKey(di,lv){return di+':'+lv;}
+function snapshot(){
+  return {di:S.di,level:S.level,mode:S.mode,seed:S.seed,
     puzzle:S.puzzle,solution:S.solution,values:S.values,notes:S.notes,
-    mist:S.mist,hints:S.hints,elapsed:S.elapsed,ts:Date.now()
-  }));
+    mist:S.mist,hints:S.hints,elapsed:S.elapsed,ts:Date.now()};
+}
+// 有沒有真的動過（避免只是打開沒填就被記成「續」）
+function hasProgress(){
+  if(!S)return false;
+  for(let i=0;i<81;i++)if(S.puzzle[i]===0&&S.values[i]!==0)return true;
+  for(let i=0;i<81;i++)if(S.notes[i]&&S.notes[i].length)return true;
+  return S.hints>0||S.mist>0;
+}
+// 存進度：全域「繼續上次」槽 +（闖關模式）該關專屬槽
+function saveCurrent(){
+  if(!S||S.done)return;
+  if(!hasProgress()){clearSaved();return;} // 沒動過就不留存檔
+  const snap=snapshot();
+  localStorage.setItem(LS.cur,JSON.stringify(snap));
+  if(S.mode==='levels'){inProgress[lvKey(S.di,S.level)]=snap;persistIP();}
+}
+// 清掉這一局的存檔（過關 / 主動重來時呼叫）
+function clearSaved(){
+  localStorage.removeItem(LS.cur);
+  if(S&&S.mode==='levels'){delete inProgress[lvKey(S.di,S.level)];persistIP();}
 }
 function getSaved(){try{return JSON.parse(localStorage.getItem(LS.cur));}catch(e){return null;}}
 
@@ -384,9 +410,13 @@ function renderLevels(){
   const p=progress[curDiff]||{};
   for(let lv=1;lv<=shownLevels;lv++){
     const done=p[lv];
+    const ip=inProgress[lvKey(curDiff,lv)];
     const b=document.createElement('button');
-    b.className='lv'+(done?' done':'');
-    b.innerHTML=`${lv}${done?`<span class="chk">✓</span><span class="tm">${fmt(done.time)}</span>`:''}`;
+    let cls='lv',inner=`${lv}`;
+    if(ip){cls+=' inprog';inner=`${lv}<span class="chk">▶</span><span class="tm">續 ${fmt(ip.elapsed)}</span>`;}
+    else if(done){cls+=' done';inner=`${lv}<span class="chk">✓</span><span class="tm">${fmt(done.time)}</span>`;}
+    b.className=cls;
+    b.innerHTML=inner;
     b.onclick=()=>startGame(curDiff,lv,'levels');
     el.appendChild(b);
   }
@@ -406,8 +436,14 @@ function renderContinue(){
 }
 
 /* ============ 遊戲流程 ============ */
-function startGame(di,level,mode,seedOverride){
+// forceNew=true 代表「重來」，忽略存檔重新生成
+function startGame(di,level,mode,seedOverride,forceNew){
   show('game');
+  // 闖關模式：若這一關有玩到一半的存檔，直接接續（除非按了重來）
+  if(mode==='levels'&&!forceNew){
+    const snap=inProgress[lvKey(di,level)];
+    if(snap){resumeGame(snap);return;}
+  }
   document.getElementById('loading').classList.add('show');
   document.getElementById('board').innerHTML='';
   // 延一格讓 loading 先畫出來，再做（可能較重）運算
@@ -420,6 +456,15 @@ function startGame(di,level,mode,seedOverride){
     document.getElementById('loading').classList.remove('show');
     buildBoard();buildPad();refreshHeader();startTimer();updateTools();saveCurrent();
   },30);
+}
+// 重來這一局：清掉存檔，重新生成同一關
+function restartGame(){
+  if(!S)return;
+  if(!confirm('重來這一關？目前的進度會清掉。'))return;
+  const {di,level,mode,seed}=S;
+  clearInterval(timerId);
+  if(mode==='levels'){delete inProgress[lvKey(di,level)];persistIP();startGame(di,level,'levels',null,true);}
+  else startGame(curDiff,0,'infinite',(Date.now()^Math.floor(Math.random()*1e9))>>>0);
 }
 function resumeGame(sv){
   show('game');
@@ -583,7 +628,7 @@ function checkWin(){
     if(!prev||S.elapsed<prev.time)progress[S.di][S.level]={time:S.elapsed,mist:S.mist};
     saveProgress();
   }
-  localStorage.removeItem(LS.cur);
+  clearSaved();
   document.getElementById('winTime').textContent=fmt(S.elapsed);
   document.getElementById('winMist').textContent=S.mist;
   document.getElementById('winHint').textContent=S.hints;
@@ -593,7 +638,7 @@ function checkWin(){
   document.getElementById('winOverlay').classList.add('show');
 }
 function gameOver(){
-  S.done=true;clearInterval(timerId);localStorage.removeItem(LS.cur);
+  clearSaved();S.done=true;clearInterval(timerId);
   document.getElementById('winTitle').textContent='錯太多次了';
   document.getElementById('winSub').textContent='再試一次就好，別氣餒！';
   document.querySelector('#winOverlay .emoji').textContent='😅';
@@ -608,6 +653,7 @@ function gameOver(){
 /* ============ 事件綁定 ============ */
 function bind(){
   document.getElementById('backBtn').onclick=()=>{saveCurrent();clearInterval(timerId);goHome();};
+  document.getElementById('restartBtn').onclick=restartGame;
   document.getElementById('undoBtn').onclick=undo;
   document.getElementById('eraseBtn').onclick=eraseCell;
   document.getElementById('notesBtn').onclick=toggleNotes;
@@ -635,7 +681,7 @@ function bind(){
   const sw=(id,key)=>{document.getElementById(id).onclick=()=>{settings[key]=!settings[key];saveSettings();syncSwitches();if(S&&!S.done)renderCells(),refreshHeader();};};
   sw('swErr','showErr');sw('swAuto','autoNote');sw('swLimit','limitMist');
   document.getElementById('resetProgress').onclick=()=>{
-    if(confirm('確定要清除所有闖關進度與紀錄嗎？')){progress={};saveProgress();localStorage.removeItem(LS.cur);renderLevels();renderContinue();}
+    if(confirm('確定要清除所有闖關進度與紀錄嗎？')){progress={};inProgress={};saveProgress();persistIP();localStorage.removeItem(LS.cur);renderLevels();renderContinue();}
   };
   // 鍵盤（iPad 外接鍵盤 / 桌機測試）
   document.addEventListener('keydown',e=>{
