@@ -1,5 +1,5 @@
 // 小數獨 service worker — 離線快取
-const CACHE = 'sudoku-v3';
+const CACHE = 'sudoku-v4';
 const ASSETS = [
   './',
   './index.html',
@@ -15,6 +15,8 @@ self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS).catch(() => {})));
 });
 self.addEventListener('activate', e => {
+  // 註：clients.claim() 只接管、不重載「當下已開著」的頁面——
+  // 已開頁面仍跑舊版，新版下次開啟才生效（預期行為，非 bug）
   e.waitUntil(
     caches.keys().then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k))))
       .then(() => self.clients.claim())

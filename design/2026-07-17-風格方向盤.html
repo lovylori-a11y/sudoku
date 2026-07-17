@@ -1,0 +1,485 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>小數獨 · 推理系列視覺方向盤</title>
+<style>
+/* ==========================================================================
+   文件本體（artboard）色 —— 刻意避開 AI 預設靛藍/紫漸層，用暖中性編輯感
+   ========================================================================== */
+:root{
+  --page-bg:#E9E3D5; --card:#FBF7EE; --ink:#2B2822; --muted:#867C6C;
+  --hair:#DAD1BF; --tag:#B4593B; --tag-soft:#EBD9CE;
+}
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;}
+body{
+  background:var(--page-bg); color:var(--ink);
+  font-family:-apple-system,BlinkMacSystemFont,"PingFang TC","Segoe UI",system-ui,sans-serif;
+  line-height:1.6; -webkit-text-size-adjust:100%;
+}
+.wrap{max-width:1040px;margin:0 auto;padding:26px 18px 80px;}
+
+/* ---- 文件頭 ---- */
+header.doc{margin-bottom:26px;}
+.kicker{font-size:12px;letter-spacing:.18em;color:var(--tag);font-weight:700;text-transform:uppercase;margin:0 0 6px;}
+h1.doc{font-size:27px;line-height:1.25;margin:0 0 10px;font-weight:800;letter-spacing:.01em;}
+.doc-sub{color:var(--muted);font-size:13.5px;margin:0 0 16px;}
+.intro{background:var(--card);border:1px solid var(--hair);border-radius:14px;padding:16px 18px;font-size:14px;}
+.intro p{margin:0 0 9px;}
+.intro p:last-child{margin-bottom:0;}
+.intro b{color:var(--tag);}
+.legend{display:flex;flex-wrap:wrap;gap:10px 18px;margin-top:12px;padding-top:12px;border-top:1px dashed var(--hair);}
+.legend .li{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--ink);}
+.legend .sw{width:14px;height:14px;border-radius:3px;border:1px solid rgba(0,0,0,.12);flex:none;}
+
+/* ==========================================================================
+   方向卡
+   ========================================================================== */
+.dir{background:var(--card);border:1px solid var(--hair);border-radius:18px;
+  padding:20px 20px 22px;margin-top:26px;box-shadow:0 1px 0 rgba(0,0,0,.02);}
+.dir-head{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:4px;}
+.dir-no{font-size:13px;font-weight:800;color:#fff;background:var(--ink);width:26px;height:26px;
+  border-radius:8px;display:grid;place-items:center;flex:none;font-variant-numeric:tabular-nums;}
+.dir-name{font-size:22px;font-weight:800;margin:0;}
+.dir-tag{color:var(--muted);font-size:14px;margin:2px 0 16px;}
+
+/* ---- 兩個模式面板並排 ---- */
+.demos{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+@media(max-width:620px){.demos{grid-template-columns:1fr;}.controls{flex-direction:column;gap:11px;}.board{max-width:320px;}}
+.panel{border-radius:14px;padding:16px 15px 18px;border:1px solid rgba(0,0,0,.06);position:relative;overflow:hidden;}
+.panel .mode-chip{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:700;
+  letter-spacing:.04em;padding:3px 9px;border-radius:999px;margin-bottom:12px;
+  background:color-mix(in srgb, var(--c-line-strong) 22%, transparent);color:var(--c-txt);}
+.panel .mode-chip::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--c-user);}
+.panel{min-width:0;}.panel-inner{position:relative;z-index:1;min-width:0;}
+
+/* ---- 棋盤（三層巢狀格：宮間距=粗線、格間距=細線） ---- */
+.board{
+  display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(3,1fr);
+  gap:var(--box-gap);padding:var(--box-gap);background:var(--c-line-strong);
+  border-radius:var(--board-radius);width:100%;max-width:340px;aspect-ratio:1;
+  container-type:inline-size;min-width:0;margin:0 auto;box-shadow:var(--board-shadow,none);
+}
+.box{display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(3,1fr);
+  gap:var(--cell-gap);background:var(--c-line);}
+.cell{background:var(--c-cell);position:relative;display:flex;align-items:center;justify-content:center;
+  border-radius:var(--cell-radius);}
+.cell.fixed{background:var(--c-fixed);}
+.cell.peer{background:var(--c-peer);}
+.cell.same{background:var(--c-same);}
+.cell.hint{background:var(--c-hint-bg);}
+.cell.sel{background:var(--c-sel);box-shadow:inset 0 0 0 max(1.6px,.6cqw) var(--c-line-strong);z-index:3;}
+.cell.err{box-shadow:inset 0 0 0 max(1.6px,.6cqw) var(--c-error);z-index:2;}
+.num{font-family:var(--num-font);font-size:7.1cqw;line-height:1;font-variant-numeric:tabular-nums;}
+.num.given{color:var(--c-given);font-weight:var(--w-given);}
+.num.user{color:var(--c-user);font-weight:var(--w-user);}
+.num.errnum{color:var(--c-error);font-weight:var(--w-given);}
+.num.hintnum{color:var(--c-correct);font-weight:var(--w-given);}
+.notes{position:absolute;inset:9%;display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(3,1fr);}
+.notes span{font-size:2.55cqw;line-height:1;color:var(--c-note);font-family:var(--num-font);
+  display:flex;align-items:center;justify-content:center;font-weight:500;}
+
+/* ---- 按鈕 + 貼紙 一排 ---- */
+.controls{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:16px;justify-content:center;}
+.btn{font-family:var(--ui-font);border:0;color:var(--c-btn-ink);background:var(--c-btn-bg);
+  font-weight:700;font-size:13.5px;cursor:default;}
+.btn.ghost{background:transparent;color:var(--c-user);box-shadow:inset 0 0 0 1.6px var(--c-line-strong);}
+.b1{border-radius:6px;padding:11px 18px;letter-spacing:.05em;}
+.b2{border-radius:10px;padding:11px 20px;}
+.b3{border-radius:14px;padding:12px 20px;box-shadow:inset 0 -4px 0 rgba(0,0,0,.20);}
+.b3.ghost{box-shadow:inset 0 0 0 1.6px var(--c-line-strong);}
+
+/* 技巧貼紙／徽章（三種形狀，收集獎勵用） */
+.sticker{font-family:var(--num-font);text-align:center;line-height:1.15;flex:none;}
+.sticker .s-term{font-weight:800;font-size:14px;}
+.sticker .s-sub{font-size:9.5px;letter-spacing:.08em;margin-top:2px;font-family:var(--ui-font);}
+/* s1 郵票標籤（虛線裁切邊）*/
+.s1{background:var(--c-cell);border:1.6px dashed var(--c-line-strong);border-radius:6px;
+  padding:8px 13px;color:var(--c-given);}
+.s1 .s-sub{color:var(--c-note);}
+/* s2 文房印（朱色雙框章）*/
+.s2{border:2.4px solid var(--c-error);border-radius:9px;padding:8px 13px;color:var(--c-error);
+  background:color-mix(in srgb, var(--c-error) 8%, var(--c-cell));box-shadow:inset 0 0 0 1.4px color-mix(in srgb,var(--c-error) 40%, transparent);}
+.s2 .s-sub{color:var(--c-error);opacity:.85;}
+/* s3 原木徽章（厚環＋塊感）*/
+.s3{background:var(--c-sel);border:3px solid var(--c-line-strong);border-radius:14px;
+  padding:8px 15px;color:var(--c-given);box-shadow:inset 0 -3px 0 rgba(0,0,0,.10);}
+.s3 .s-sub{color:var(--c-given);opacity:.7;}
+
+/* ---- 色票 ---- */
+.spec{margin-top:20px;}
+.spec h3{font-size:13px;letter-spacing:.06em;color:var(--muted);margin:0 0 10px;text-transform:uppercase;font-weight:800;}
+.pal-mode{margin-bottom:12px;}
+.pal-mode .m-label{font-size:12px;font-weight:700;color:var(--ink);margin-bottom:7px;}
+.swatches{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;}
+@media(max-width:480px){.swatches{grid-template-columns:repeat(2,1fr);}}
+.chip{border:1px solid var(--hair);border-radius:9px;overflow:hidden;background:#fff;}
+.chip .blk{height:34px;}
+.chip .meta{padding:5px 7px 6px;}
+.chip .nm{font-size:11px;font-weight:700;line-height:1.2;}
+.chip .hx{font-size:10px;color:var(--muted);font-variant-numeric:tabular-nums;letter-spacing:.02em;}
+
+/* ---- 字體策略 ---- */
+.font-block{margin-top:20px;border-top:1px dashed var(--hair);padding-top:16px;}
+.font-grid{display:grid;grid-template-columns:auto 1fr;gap:14px 18px;align-items:center;}
+@media(max-width:520px){.font-grid{grid-template-columns:1fr;}}
+.font-sample{display:flex;align-items:baseline;gap:12px;}
+.font-sample .digit{font-size:44px;line-height:1;font-variant-numeric:tabular-nums;}
+.font-sample .row{font-size:26px;line-height:1;letter-spacing:.04em;font-variant-numeric:tabular-nums;}
+.font-note{font-size:13px;}
+.font-note .swiftui{display:inline-block;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+  font-size:12px;background:var(--tag-soft);color:#7A3A24;padding:2px 7px;border-radius:5px;margin-top:6px;}
+.font-note b{color:var(--tag);}
+
+/* ---- 氣質說明 ---- */
+.temper{margin-top:18px;border-top:1px dashed var(--hair);padding-top:14px;font-size:13.5px;}
+.temper .t-row{display:flex;gap:8px;margin-bottom:6px;}
+.temper .t-row:last-child{margin-bottom:0;}
+.temper .who{flex:none;font-weight:800;color:var(--tag);width:74px;}
+.temper .who.parent{color:#5A6B4A;}
+
+/* ---- 三方向紋理背景（純 CSS，賣質感、不傷可讀性）---- */
+.dir1 .panel{background:var(--c-panel);
+  background-image:
+    linear-gradient(color-mix(in srgb,var(--c-line) 55%,transparent) 1px,transparent 1px),
+    linear-gradient(90deg,color-mix(in srgb,var(--c-line) 55%,transparent) 1px,transparent 1px);
+  background-size:20px 20px;background-position:-1px -1px;}
+.dir2 .panel{background:var(--c-panel);}
+.dir3 .panel{background:var(--c-panel);
+  background-image:repeating-linear-gradient(94deg,
+    color-mix(in srgb,var(--c-line) 40%,transparent) 0 2px,
+    transparent 2px 13px);}
+
+/* ==========================================================================
+   三方向 × 兩模式 的完整調色盤（單一真相：色票與示意皆讀這裡）
+   ========================================================================== */
+/* 方向 1 · 鉛筆演算紙 */
+.dir1{--num-font:ui-serif,"New York","Times New Roman",Georgia,serif;
+  --ui-font:-apple-system,BlinkMacSystemFont,"PingFang TC",system-ui,sans-serif;
+  --w-given:600;--w-user:400;
+  --box-gap:2px;--cell-gap:1px;--cell-radius:1px;--board-radius:4px;--board-shadow:none;}
+.dir1 .panel.light{
+  --c-panel:#EFE7D6;--c-txt:#3A362E;--c-muted:#7A7060;
+  --c-cell:#FBF6EA;--c-fixed:#F0E8D6;
+  --c-given:#2E2A24;--c-user:#2F4A5E;--c-note:#6E6250;
+  --c-line:#CBBFA8;--c-line-strong:#8C7E63;
+  --c-sel:#F6DE9B;--c-peer:#F3ECDA;--c-same:#EFDCA6;--c-hint-bg:#E7EFDC;
+  --c-error:#B23A2E;--c-correct:#4F7A3F;
+  --c-btn-bg:#37342C;--c-btn-ink:#FBF6EA;}
+.dir1 .panel.dark{
+  --c-panel:#201E19;--c-txt:#E7E0D2;--c-muted:#A99C86;
+  --c-cell:#2B2823;--c-fixed:#322E27;
+  --c-given:#EDE6D6;--c-user:#8FB9DE;--c-note:#A99C86;
+  --c-line:#3A362E;--c-line-strong:#6E6552;
+  --c-sel:#4A4123;--c-peer:#34302A;--c-same:#3F3A28;--c-hint-bg:#2C3324;
+  --c-error:#E58A7C;--c-correct:#93C47D;
+  --c-btn-bg:#E7C56B;--c-btn-ink:#221F1A;}
+
+/* 方向 2 · 靛青文房 */
+.dir2{--num-font:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",Arial,sans-serif;
+  --ui-font:-apple-system,BlinkMacSystemFont,"PingFang TC",system-ui,sans-serif;
+  --w-given:600;--w-user:400;
+  --box-gap:2px;--cell-gap:1px;--cell-radius:2px;--board-radius:9px;
+  --board-shadow:0 2px 10px rgba(31,42,56,.10);}
+.dir2 .panel.light{
+  --c-panel:#E8E3D4;--c-txt:#2A3644;--c-muted:#5B6774;
+  --c-cell:#F3F0E6;--c-fixed:#E5E8ED;
+  --c-given:#1F2A38;--c-user:#275C86;--c-note:#566573;
+  --c-line:#C3C4BB;--c-line-strong:#5A6B7A;
+  --c-sel:#CBD8E4;--c-peer:#E4E7E7;--c-same:#D5E1EA;--c-hint-bg:#DDE9E0;
+  --c-error:#B23F2C;--c-correct:#3F6B52;
+  --c-btn-bg:#26405A;--c-btn-ink:#F3F0E6;}
+.dir2 .panel.dark{
+  --c-panel:#151A20;--c-txt:#DCE2E9;--c-muted:#93A2B0;
+  --c-cell:#1E252E;--c-fixed:#28313C;
+  --c-given:#E6E9EE;--c-user:#7FB4DC;--c-note:#93A2B0;
+  --c-line:#2E3742;--c-line-strong:#566472;
+  --c-sel:#2C3E52;--c-peer:#252D37;--c-same:#2A3A48;--c-hint-bg:#213029;
+  --c-error:#E58A78;--c-correct:#83BE98;
+  --c-btn-bg:#8FC0E4;--c-btn-ink:#12181F;}
+
+/* 方向 3 · 原木教具 */
+.dir3{--num-font:ui-rounded,"SF Pro Rounded","Arial Rounded MT Bold",system-ui,sans-serif;
+  --ui-font:-apple-system,BlinkMacSystemFont,"PingFang TC",system-ui,sans-serif;
+  --w-given:700;--w-user:600;
+  --box-gap:3px;--cell-gap:2px;--cell-radius:7px;--board-radius:15px;
+  --board-shadow:0 3px 12px rgba(74,53,36,.14);}
+.dir3 .panel.light{
+  --c-panel:#F1E6D2;--c-txt:#4A3B2E;--c-muted:#8A745A;
+  --c-cell:#FBF3E3;--c-fixed:#EFE1C8;
+  --c-given:#4A3524;--c-user:#196B57;--c-note:#7C6444;
+  --c-line:#E0CBA6;--c-line-strong:#A9814E;
+  --c-sel:#F6CE7C;--c-peer:#F4E9D2;--c-same:#F2DDAE;--c-hint-bg:#DDECD5;
+  --c-error:#BE4630;--c-correct:#3E8A4F;
+  --c-btn-bg:#1F7A63;--c-btn-ink:#FFF6E6;}
+.dir3 .panel.dark{
+  --c-panel:#221A10;--c-txt:#EFE3CE;--c-muted:#B29A72;
+  --c-cell:#2E251A;--c-fixed:#392E1F;
+  --c-given:#F2E7D3;--c-user:#63C6A9;--c-note:#B29A72;
+  --c-line:#453725;--c-line-strong:#7A5E3B;
+  --c-sel:#6A4E22;--c-peer:#382C1D;--c-same:#4A3A22;--c-hint-bg:#2A331F;
+  --c-error:#E88E70;--c-correct:#84C88C;
+  --c-btn-bg:#5FC4A6;--c-btn-ink:#22190F;}
+
+footer.doc{margin-top:34px;background:var(--card);border:1px solid var(--hair);border-radius:14px;
+  padding:16px 18px;font-size:13.5px;}
+footer.doc b{color:var(--tag);}
+footer.doc .pick{font-weight:800;font-size:15px;color:var(--ink);margin-bottom:6px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="doc">
+    <p class="kicker">推理系列 · 品牌面 C · 視覺語言提案</p>
+    <h1 class="doc">小數獨 · 三個視覺風格方向盤</h1>
+    <p class="doc-sub">挑一個成為整個推理系列的視覺語言 · 2026-07-17 · 丹青（設計）</p>
+    <div class="intro">
+      <p>現行 PWA 給人「AI 直接設定」的感覺，來自三個地方：<b>系統預設的靛藍→紫漸層</b>（logo 與按鈕）、<b>系統藍的填字數字</b>、以及<b>千篇一律的柔和陰影＋統一圓角＋emoji</b>。這三樣，下面三個方向全部拿掉，改從真實的「文具質感」長出個性。</p>
+      <p>三個方向<b>刻意彼此不同</b>：一個是鉛筆演算紙的手作感、一個是日系文房的沉靜、一個是原木教具的踏實。每個方向都給你<b>淺色＋深色</b>兩套完整調色盤、純系統字體策略（可平移 SwiftUI）、以及一個用純 CSS 畫的迷你 9×9 實物示意——含「給定／已填／筆記／選中／錯誤／提示」六種狀態，加一顆主按鈕、一枚技巧收集徽章。全部零外部資源、對比度過 WCAG AA。</p>
+      <div class="legend" id="legend"></div>
+    </div>
+  </header>
+
+  <!-- 方向 1 -->
+  <section class="dir dir1">
+    <div class="dir-head">
+      <span class="dir-no">1</span>
+      <h2 class="dir-name">鉛筆演算紙</h2>
+    </div>
+    <p class="dir-tag">像在方格演算紙上，用一支鉛筆認真算一題——手作、專注、不花俏。</p>
+    <div class="demos" data-dir="1"></div>
+    <div class="spec" id="spec-1"></div>
+    <div class="font-block">
+      <h3 class="dir-name" style="font-size:13px;letter-spacing:.06em;color:var(--muted);text-transform:uppercase;margin:0 0 12px">字體策略</h3>
+      <div class="font-grid dir1">
+        <div class="panel light" style="border:0;padding:0;background:none">
+          <div class="font-sample">
+            <span class="digit" style="color:var(--c-given);font-family:var(--num-font);font-weight:600">7</span>
+            <span class="row" style="color:var(--c-given);font-family:var(--num-font);font-weight:600">1 2 3</span>
+            <span class="row" style="color:var(--c-user);font-family:var(--num-font);font-weight:400">4 5 6</span>
+          </div>
+        </div>
+        <div class="font-note">
+          數字用<b>系統襯線體</b>（Apple 上的 New York／`ui-serif`）——襯線的橫豎粗細差，讓數字有「印在課本上」的認真感。給定 600、玩家填 400（像鉛筆的輕），棋盤主角一眼分得出誰是題目、誰是自己填的。
+          <span class="swiftui">SwiftUI：.system(size:, weight:, design: .serif)</span>
+        </div>
+      </div>
+    </div>
+    <div class="temper">
+      <div class="t-row"><span class="who">給小孩</span><span>像大人在用的演算紙，一筆一畫算出來的成就感，不被當小孩哄。</span></div>
+      <div class="t-row"><span class="who parent">給家長</span><span>樸素、專注、有紙筆的手感——這是在「練思考」，不是聲光刺激的糖果 app。</span></div>
+    </div>
+  </section>
+
+  <!-- 方向 2 -->
+  <section class="dir dir2">
+    <div class="dir-head">
+      <span class="dir-no">2</span>
+      <h2 class="dir-name">靛青文房</h2>
+    </div>
+    <p class="dir-tag">日式書桌上的靛藍與米白，一枚朱紅小印——安靜地把一題想透。</p>
+    <div class="demos" data-dir="2"></div>
+    <div class="spec" id="spec-2"></div>
+    <div class="font-block">
+      <h3 class="dir-name" style="font-size:13px;letter-spacing:.06em;color:var(--muted);text-transform:uppercase;margin:0 0 12px">字體策略</h3>
+      <div class="font-grid dir2">
+        <div class="panel light" style="border:0;padding:0;background:none">
+          <div class="font-sample">
+            <span class="digit" style="color:var(--c-given);font-family:var(--num-font);font-weight:600">7</span>
+            <span class="row" style="color:var(--c-given);font-family:var(--num-font);font-weight:600">1 2 3</span>
+            <span class="row" style="color:var(--c-user);font-family:var(--num-font);font-weight:400">4 5 6</span>
+          </div>
+        </div>
+        <div class="font-note">
+          數字用<b>系統無襯線體</b>（Apple 上的 SF Pro／`-apple-system`），乾淨俐落，靠留白與較大字級撐出沉靜。給定 600、玩家填 400，數字不搶戲，讓深靛藍的背景把注意力收攏。
+          <span class="swiftui">SwiftUI：.system(size:, weight:, design: .default)</span>
+        </div>
+      </div>
+    </div>
+    <div class="temper">
+      <div class="t-row"><span class="who">給小孩</span><span>安靜、沉得住氣，像進了一間乾淨的書房——被當成能專心的人看待。</span></div>
+      <div class="t-row"><span class="who parent">給家長</span><span>有品質、有節制的美感，日系文房的可靠氣息；方法論清楚、不吵不鬧。</span></div>
+    </div>
+  </section>
+
+  <!-- 方向 3 -->
+  <section class="dir dir3">
+    <div class="dir-head">
+      <span class="dir-no">3</span>
+      <h2 class="dir-name">原木教具</h2>
+    </div>
+    <p class="dir-tag">蒙特梭利木製教具的溫度，一格一塊踏踏實實放上去——明快、可觸、有引導感。</p>
+    <div class="demos" data-dir="3"></div>
+    <div class="spec" id="spec-3"></div>
+    <div class="font-block">
+      <h3 class="dir-name" style="font-size:13px;letter-spacing:.06em;color:var(--muted);text-transform:uppercase;margin:0 0 12px">字體策略</h3>
+      <div class="font-grid dir3">
+        <div class="panel light" style="border:0;padding:0;background:none">
+          <div class="font-sample">
+            <span class="digit" style="color:var(--c-given);font-family:var(--num-font);font-weight:700">7</span>
+            <span class="row" style="color:var(--c-given);font-family:var(--num-font);font-weight:700">1 2 3</span>
+            <span class="row" style="color:var(--c-user);font-family:var(--num-font);font-weight:600">4 5 6</span>
+          </div>
+        </div>
+        <div class="font-note">
+          數字用<b>系統圓體</b>（Apple 上的 SF Pro Rounded／`ui-rounded`）——圓角端點像磨過的木塊，兒童辨識度最高。字重刻意加厚：給定 700、玩家填 600，飽滿、好按、好讀，配合大圓角格子像一塊塊教具。
+          <span class="swiftui">SwiftUI：.system(size:, weight:, design: .rounded)</span>
+        </div>
+      </div>
+    </div>
+    <div class="temper">
+      <div class="t-row"><span class="who">給小孩</span><span>暖、好上手、想動手放上去；每填對一格像多疊一塊積木，明快有回饋。</span></div>
+      <div class="t-row"><span class="who parent">給家長</span><span>像看到一套好教具——溫暖、耐用、有引導感；明亮但不幼稚、不吵鬧。</span></div>
+    </div>
+  </section>
+
+  <footer class="doc">
+    <div class="pick">丹青的推薦：方向 1「鉛筆演算紙」</div>
+    <p>三個都站得住，但推理系列的核心賣點是<b>「認真推理、引導觀察、永不代填」</b>——「鉛筆演算紙」把這件事變成看得見的質感：紙筆手作感天然說「這是在動腦」，最不像糖果 app，也最容易延伸到系列裡的下一款（小偵探等）。「靛青文房」氣質最高但對小小孩略冷；「原木教具」最暖最好上手，若使用者年齡層想往下壓、主打親子共玩，它是第一備選。最終由你定。</p>
+  </footer>
+
+</div>
+
+<script>
+"use strict";
+/* ===== 迷你棋盤示意：世界名局做底，疊上六種狀態 ===== */
+const GIVENS={0:5,1:3,4:7,9:6,12:1,13:9,14:5,19:9,20:8,25:6,27:8,31:6,35:3,
+  36:4,39:8,41:3,44:1,45:7,49:2,53:6,55:6,60:2,61:8,66:4,67:1,68:9,71:5,76:8,79:7,80:9};
+const USER={2:4,10:7,18:1};      // 玩家自己填對的
+const NOTES={6:[1,2,9]};          // 鉛筆筆記候選數
+const SEL=2, SELVAL=4;            // 選中格（同時是玩家填的 4）→ 觸發同行列宮＋同數字高亮
+const ERR=46, ERRVAL=8;          // 填錯（正解是 1）→ 紅
+const HINT=62, HINTVAL=4;        // 提示填入 → 綠
+
+function peers(sel){
+  const r=(sel/9|0),c=sel%9,br=(r/3|0)*3,bc=(c/3|0)*3,s=new Set();
+  for(let i=0;i<9;i++){s.add(r*9+i);s.add(i*9+c);}
+  for(let i=0;i<3;i++)for(let j=0;j<3;j++)s.add((br+i)*9+(bc+j));
+  s.delete(sel);return s;
+}
+const PEER=peers(SEL);
+function valAt(i){
+  if(i in GIVENS)return GIVENS[i];
+  if(i in USER)return USER[i];
+  if(i===ERR)return ERRVAL;
+  if(i===HINT)return HINTVAL;
+  return 0;
+}
+function buildBoard(){
+  const board=document.createElement('div');board.className='board';
+  for(let bi=0;bi<9;bi++){
+    const box=document.createElement('div');box.className='box';
+    const br=(bi/3|0)*3, bc=(bi%3)*3;
+    for(let ci=0;ci<9;ci++){
+      const r=br+(ci/3|0), c=bc+(ci%3), i=r*9+c;
+      const cell=document.createElement('div');cell.className='cell';
+      const v=valAt(i), fixed=(i in GIVENS);
+      if(fixed)cell.classList.add('fixed');
+      // 背景狀態優先序：選中 > 錯誤 > 提示 > 同數字 > 同行列宮
+      if(i===SEL)cell.classList.add('sel');
+      else if(i===ERR)cell.classList.add('err');
+      else if(i===HINT)cell.classList.add('hint');
+      else if(v && v===SELVAL)cell.classList.add('same');
+      else if(PEER.has(i))cell.classList.add('peer');
+      if(v){
+        const s=document.createElement('span');
+        s.className='num '+(i===ERR?'errnum':i===HINT?'hintnum':(i in USER)?'user':'given');
+        s.textContent=v;cell.appendChild(s);
+      }else if(i in NOTES){
+        const nb=document.createElement('div');nb.className='notes';
+        for(let n=1;n<=9;n++){const sp=document.createElement('span');
+          sp.textContent=NOTES[i].includes(n)?n:'';nb.appendChild(sp);}
+        cell.appendChild(nb);
+      }
+      box.appendChild(cell);
+    }
+    board.appendChild(box);
+  }
+  return board;
+}
+
+/* ===== 一個模式面板（棋盤＋按鈕＋貼紙）===== */
+function buildPanel(dir,mode){
+  const p=document.createElement('div');
+  p.className='panel '+mode;
+  const chip=mode==='light'?'淺色 · Light':'深色 · Dark';
+  const inner=document.createElement('div');inner.className='panel-inner';
+  inner.innerHTML='<span class="mode-chip">'+chip+'</span>';
+  inner.appendChild(buildBoard());
+  // 控制列：主按鈕 + 次按鈕 + 技巧徽章
+  const ctr=document.createElement('div');ctr.className='controls';
+  const bcls=dir==='1'?'b1':dir==='2'?'b2':'b3';
+  const primary=dir==='3'?'出一題新的':dir==='2'?'出一題新的':'出一題新的';
+  ctr.innerHTML=
+    '<button class="btn '+bcls+'">'+primary+'</button>'+
+    '<button class="btn '+bcls+' ghost">看技巧</button>';
+  const scls=dir==='1'?'s1':dir==='2'?'s2':'s3';
+  const sub=dir==='2'?'文房印 · 已收集':'技巧徽章 · 已收集';
+  const st=document.createElement('div');st.className='sticker '+scls;
+  st.innerHTML='<div class="s-term">隱性單數</div><div class="s-sub">'+sub+'</div>';
+  ctr.appendChild(st);
+  inner.appendChild(ctr);
+  p.appendChild(inner);
+  return p;
+}
+document.querySelectorAll('.demos').forEach(d=>{
+  const dir=d.dataset.dir;
+  d.appendChild(buildPanel(dir,'light'));
+  d.appendChild(buildPanel(dir,'dark'));
+});
+
+/* ===== 色票（直接讀 CSS 變數，色票＝示意用的是同一組色，不會對不上）===== */
+const SW=[
+  ['--c-given','給定數字（主墨）'],['--c-user','玩家填字（主色）'],
+  ['--c-correct','正確／提示（輔色）'],['--c-error','錯誤紅'],
+  ['--c-panel','背景'],['--c-cell','格面'],
+  ['--c-line-strong','格線（粗）'],['--c-sel','選中態'],
+];
+function readVars(dir,mode){
+  const probe=document.createElement('div');probe.className='dir'+dir;
+  probe.style.cssText='position:absolute;left:-9999px;top:-9999px;';
+  const pan=document.createElement('div');pan.className='panel '+mode;
+  probe.appendChild(pan);document.body.appendChild(probe);
+  const cs=getComputedStyle(pan);
+  const out={};SW.forEach(([v])=>out[v]=cs.getPropertyValue(v).trim());
+  document.body.removeChild(probe);return out;
+}
+function swatchRow(dir,mode,label){
+  const vars=readVars(dir,mode);
+  const box=document.createElement('div');box.className='pal-mode';
+  box.innerHTML='<div class="m-label">'+label+'</div>';
+  const grid=document.createElement('div');grid.className='swatches';
+  SW.forEach(([v,nm])=>{
+    const hex=(vars[v]||'').toUpperCase();
+    const c=document.createElement('div');c.className='chip';
+    c.innerHTML='<div class="blk" style="background:'+vars[v]+'"></div>'+
+      '<div class="meta"><div class="nm">'+nm+'</div><div class="hx">'+hex+'</div></div>';
+    grid.appendChild(c);
+  });
+  box.appendChild(grid);return box;
+}
+['1','2','3'].forEach(dir=>{
+  const host=document.getElementById('spec-'+dir);
+  const h=document.createElement('h3');h.textContent='調色盤（淺色 + 深色）';host.appendChild(h);
+  host.appendChild(swatchRow(dir,'light','淺色模式'));
+  host.appendChild(swatchRow(dir,'dark','深色模式'));
+});
+
+/* ===== 頂部圖例 ===== */
+const LEG=[
+  ['#F0E8D6','給定（題目數字）'],['#2F4A5E','已填（玩家）'],
+  ['#6E6250','筆記（候選小字）'],['#F6DE9B','選中格'],
+  ['#B23A2E','錯誤'],['#4F7A3F','提示／正確'],
+];
+const leg=document.getElementById('legend');
+LEG.forEach(([c,t])=>{
+  const li=document.createElement('div');li.className='li';
+  li.innerHTML='<span class="sw" style="background:'+c+'"></span>'+t;
+  leg.appendChild(li);
+});
+</script>
+</body>
+</html>

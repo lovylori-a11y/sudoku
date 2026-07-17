@@ -182,7 +182,7 @@ body{
     </div>
 
     <button id="continueBtn" class="continue" style="display:none">
-      <div class="t">▶ 繼續上次那局</div>
+      <div class="t" id="continueTitle">▶ 接續上次</div>
       <div class="s" id="continueSub"></div>
     </button>
 
@@ -280,15 +280,17 @@ body{
 <script>
 "use strict";
 /* ============ 資料 ============ */
-// tier=允許用到的最高階人類技巧(1=只單元素;2=區塊排除+數對等)；floor=挖到剩幾格提示就停
+// tier=允許用到的最高階人類技巧；floor=挖到剩幾格提示就停
+// 全部 tier:1 = 只用「單元素」(某數在一宮/行/列只能放這格、或這格只剩一個數)即可解，
+// 保證「隨時都有一格能靠掃描填出來」，永遠不會卡到要抓數三/隱數對。難度只由空格多寡決定。
 const DIFFS=[
-  {key:'easy',   name:'簡單', tier:1, floor:44, sub:'掃描就能解',   color:'#22c55e'},
-  {key:'medium', name:'中等', tier:1, floor:34, sub:'需要一點推理', color:'#3b82f6'},
-  {key:'hard',   name:'困難', tier:2, floor:30, sub:'要動點腦',     color:'#f59e0b'},
-  {key:'expert', name:'專家', tier:2, floor:24, sub:'高手挑戰',     color:'#ef4444'},
+  {key:'easy',   name:'簡單', tier:1, floor:46, sub:'空少、好上手',   color:'#22c55e'},
+  {key:'medium', name:'中等', tier:1, floor:38, sub:'多一點掃描',     color:'#3b82f6'},
+  {key:'hard',   name:'困難', tier:1, floor:30, sub:'要仔細掃',       color:'#f59e0b'},
+  {key:'expert', name:'專家', tier:1, floor:25, sub:'空最多、最燒腦', color:'#ef4444'},
 ];
 const LEVELS_BATCH=30;           // 一次顯示幾關（按「更多」再加）
-const LS={prog:'sudoku.progress.v1', cur:'sudoku.current.v1', set:'sudoku.settings.v1', ip:'sudoku.inprogress.v1'};
+const LS={prog:'sudoku.progress.v1', cur:'sudoku.current.v1', set:'sudoku.settings.v1', ip:'sudoku.inprogress.v1', last:'sudoku.lastplayed.v1'};
 
 /* ============ 亂數（可重現，關卡靠 seed 固定） ============ */
 function mulberry32(seed){let a=seed>>>0;return function(){a|=0;a=a+0x6D2B79F5|0;
@@ -419,7 +421,7 @@ function generate(di,seedNum){
 
 /* ============ 狀態 ============ */
 let S=null; // 目前遊戲
-let curDiff=0, curTab='levels', shownLevels=LEVELS_BATCH;
+let curDiff=0, curTab='levels', shownByDiff={};
 let timerId=null;
 let settings={showErr:true,autoNote:true,limitMist:false};
 let progress={}; // {di:{lv:{time,mist}}}
@@ -461,6 +463,9 @@ function clearSaved(){
   if(S&&S.mode==='levels'){delete inProgress[lvKey(S.di,S.level)];persistIP();}
 }
 function getSaved(){try{return JSON.parse(localStorage.getItem(LS.cur));}catch(e){return null;}}
+// 記「最後玩的那一關」（只記闖關模式）——供主畫面「接續上次」直達；即使破關後存檔清掉也留著
+function markLastPlayed(di,level){try{localStorage.setItem(LS.last,JSON.stringify({di,level}));}catch(e){}}
+function getLastPlayed(){try{const v=JSON.parse(localStorage.getItem(LS.last));if(v&&typeof v.di==='number'&&typeof v.level==='number')return v;}catch(e){}return null;}
 
 /* ============ 畫面切換 ============ */
 function show(id){document.querySelectorAll('.screen').forEach(s=>s.classList.toggle('active',s.id===id));}
@@ -472,15 +477,60 @@ function renderDiffs(){
     const b=document.createElement('button');
     b.className='diff'+(i===curDiff?' sel':'');
     b.innerHTML=`<div class="n"><span class="d" style="background:${d.color}"></span>${d.name}</div><div class="p">${d.sub}</div>`;
-    b.onclick=()=>{curDiff=i;renderDiffs();renderLevels();};
+    b.onclick=()=>{curDiff=i;renderDiffs();renderLevels(true);};
     el.appendChild(b);
   });
 }
 function fmt(t){const s=Math.floor(t/1000);return Math.floor(s/60)+':'+String(s%60).padStart(2,'0');}
-function renderLevels(){
+// 某難度玩家「走到最遠」的關卡（破關/玩到一半/最後遊玩皆算）——決定關卡列表要自動長到哪
+function furthestLevel(di){
+  let m=0;
+  const p=progress[di]||{};
+  for(const lv in p){const n=+lv;if(n>m)m=n;}
+  for(const k in inProgress){const s=inProgress[k];if(s&&s.di===di&&s.mode!=='infinite'&&s.level>m)m=s.level;}
+  const last=getLastPlayed();if(last&&last.di===di&&last.level>m)m=last.level;
+  return m;
+}
+// 下一個要玩的關卡：最遠關還沒破（或有半局要續）→ 它本身；已破了 → 下一關
+// （邊界：剛好破在 30 的整數倍且無半局時，下一關在下一批，列表要載到它）
+function nextLevel(di){
+  const f=furthestLevel(di);
+  if(f===0)return 1;
+  const done=progress[di]&&progress[di][f];
+  if(!done||inProgress[lvKey(di,f)])return f;
+  return f+1;
+}
+// 該難度目前要顯示幾關：至少一批，且自動長到能看見「下一個要玩的關」所在的整批；使用者手動「顯示更多」的展開量也保留
+function shownForDiff(di){
+  const t=nextLevel(di);
+  const auto=Math.max(LEVELS_BATCH,Math.ceil(t/LEVELS_BATCH)*LEVELS_BATCH);
+  const cur=shownByDiff[di]||0;
+  const n=Math.max(cur,auto);
+  shownByDiff[di]=n;
+  return n;
+}
+// 主畫面「接續上次」要直達哪裡：①正在進行的那局（任何模式）②最後玩的那一關 ③（向後相容）最近的半局/最高破關關
+function continueTarget(){
+  const sv=getSaved();
+  if(sv)return {kind:'resume',snap:sv,di:sv.di,level:sv.level,mode:sv.mode,elapsed:sv.elapsed};
+  const last=getLastPlayed();
+  if(last)return {kind:'level',di:last.di,level:last.level,mode:'levels'};
+  let bestIP=null;
+  for(const k in inProgress){const s=inProgress[k];if(!s||s.mode==='infinite')continue;if(!bestIP||(s.ts||0)>(bestIP.ts||0))bestIP=s;}
+  if(bestIP)return {kind:'level',di:bestIP.di,level:bestIP.level,mode:'levels'};
+  // 舊格式限制（非 bug）：progress.v1 沒有時間戳，只能取「關卡編號最高」當代理，
+  // 不是真的「最近玩」——僅在升級後第一次、且無半局存檔時走到這裡，之後由 lastplayed 接手
+  let best=null;
+  for(const di in progress)for(const lv in progress[di]){const L=+lv,D=+di;if(!best||L>best.level)best={di:D,level:L};}
+  if(best)return {kind:'level',di:best.di,level:best.level,mode:'levels'};
+  return null;
+}
+function renderLevels(autoScroll){
   const el=document.getElementById('levels');el.innerHTML='';
   const p=progress[curDiff]||{};
-  for(let lv=1;lv<=shownLevels;lv++){
+  const shown=shownForDiff(curDiff);
+  const target=nextLevel(curDiff);let targetBtn=null;
+  for(let lv=1;lv<=shown;lv++){
     const done=p[lv];
     const ip=inProgress[lvKey(curDiff,lv)];
     const b=document.createElement('button');
@@ -490,27 +540,40 @@ function renderLevels(){
     b.className=cls;
     b.innerHTML=inner;
     b.onclick=()=>startGame(curDiff,lv,'levels');
+    if(lv===target)targetBtn=b;
     el.appendChild(b);
   }
   const more=document.createElement('button');
   more.className='more';more.textContent='顯示更多關卡 +';
-  more.onclick=()=>{shownLevels+=LEVELS_BATCH;renderLevels();};
+  more.onclick=()=>{shownByDiff[curDiff]=shownForDiff(curDiff)+LEVELS_BATCH;renderLevels();};
   el.appendChild(more);
+  // 進度在第一批之外時，捲到玩家目前進度所在的位置（使用者切難度時觸發，不在首頁初載硬捲）
+  if(autoScroll&&targetBtn&&target>LEVELS_BATCH){
+    requestAnimationFrame(()=>targetBtn.scrollIntoView({block:'center',behavior:'auto'}));
+  }
 }
 function renderContinue(){
-  const sv=getSaved();const btn=document.getElementById('continueBtn');
-  if(sv){
-    const dn=DIFFS[sv.di].name;
-    const where=sv.mode==='infinite'?'無限練習':`第 ${sv.level} 關`;
-    document.getElementById('continueSub').textContent=`${dn}・${where}・已用 ${fmt(sv.elapsed)}`;
-    btn.style.display='block';
-  }else btn.style.display='none';
+  const t=continueTarget();const btn=document.getElementById('continueBtn');
+  if(!t){btn.style.display='none';return;}
+  const dn=DIFFS[t.di].name;
+  const where=t.mode==='infinite'?'無限練習':`第 ${t.level} 關`;
+  let title,tail;
+  if(t.kind==='resume'){title='▶ 繼續上次那局';tail=`已用 ${fmt(t.elapsed)}`;}
+  else{
+    title='▶ 接續上次';
+    const done=progress[t.di]&&progress[t.di][t.level];
+    tail=done?`已破・最佳 ${fmt(done.time)}`:'繼續挑戰';
+  }
+  document.getElementById('continueTitle').textContent=title;
+  document.getElementById('continueSub').textContent=`${dn}・${where}・${tail}`;
+  btn.style.display='block';
 }
 
 /* ============ 遊戲流程 ============ */
 // forceNew=true 代表「重來」，忽略存檔重新生成
 function startGame(di,level,mode,seedOverride,forceNew){
   show('game');
+  if(mode==='levels')markLastPlayed(di,level);   // 記最後玩的那一關（供「接續上次」）
   // 闖關模式：若這一關有玩到一半的存檔，直接接續（除非按了重來）
   if(mode==='levels'&&!forceNew){
     const snap=inProgress[lvKey(di,level)];
@@ -540,6 +603,7 @@ function restartGame(){
 }
 function resumeGame(sv){
   show('game');
+  if(sv.mode==='levels')markLastPlayed(sv.di,sv.level);
   S={di:sv.di,level:sv.level,mode:sv.mode,seed:sv.seed,puzzle:sv.puzzle,solution:sv.solution,
      values:sv.values,notes:sv.notes,sel:-1,mist:sv.mist,hints:sv.hints,elapsed:sv.elapsed,
      notesMode:false,done:false,history:[]};
@@ -730,7 +794,12 @@ function bind(){
   document.getElementById('eraseBtn').onclick=eraseCell;
   document.getElementById('notesBtn').onclick=toggleNotes;
   document.getElementById('hintBtn').onclick=hint;
-  document.getElementById('continueBtn').onclick=()=>{const sv=getSaved();if(sv)resumeGame(sv);};
+  document.getElementById('continueBtn').onclick=()=>{
+    const t=continueTarget();if(!t)return;
+    if(t.mode!=='infinite'&&typeof t.di==='number'){curDiff=t.di;renderDiffs();}
+    if(t.kind==='resume')resumeGame(t.snap);
+    else startGame(t.di,t.level,'levels'); // 有半局存檔會自動接續，否則新開該關
+  };
   document.getElementById('infiniteStart').onclick=()=>startGame(curDiff,0,'infinite',(Date.now()^Math.floor(Math.random()*1e9))>>>0);
   document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
     curTab=t.dataset.mode;
@@ -753,7 +822,7 @@ function bind(){
   const sw=(id,key)=>{document.getElementById(id).onclick=()=>{settings[key]=!settings[key];saveSettings();syncSwitches();if(S&&!S.done)renderCells(),refreshHeader();};};
   sw('swErr','showErr');sw('swAuto','autoNote');sw('swLimit','limitMist');
   document.getElementById('resetProgress').onclick=()=>{
-    if(confirm('確定要清除所有闖關進度與紀錄嗎？')){progress={};inProgress={};saveProgress();persistIP();localStorage.removeItem(LS.cur);renderLevels();renderContinue();}
+    if(confirm('確定要清除所有闖關進度與紀錄嗎？')){progress={};inProgress={};shownByDiff={};saveProgress();persistIP();localStorage.removeItem(LS.cur);localStorage.removeItem(LS.last);renderLevels();renderContinue();}
   };
   // 鍵盤（iPad 外接鍵盤 / 桌機測試）
   document.addEventListener('keydown',e=>{
@@ -785,6 +854,8 @@ function syncSwitches(){
 function goHome(){show('home');renderLevels();renderContinue();}
 
 /* ============ 啟動 ============ */
-loadStore();bind();renderDiffs();renderLevels();renderContinue();
+loadStore();bind();
+{const _ct=continueTarget();if(_ct&&_ct.mode!=='infinite'&&typeof _ct.di==='number')curDiff=_ct.di;}
+renderDiffs();renderLevels();renderContinue();
 if('serviceWorker'in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));}
 </script>
