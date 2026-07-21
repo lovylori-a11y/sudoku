@@ -114,6 +114,17 @@ body{
 .cell.hintv{color:var(--hint)!important;}
 .cell.flash{animation:flash .5s;}
 @keyframes flash{0%,100%{background:var(--cell)}50%{background:#fca5a5}}
+.cell.coachhi{background:#fde68a;}
+:root[data-theme="dark"] .cell.coachhi{background:#7a5c17;}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .cell.coachhi{background:#7a5c17;}}
+.coach{margin-top:12px;background:var(--panel);border-radius:12px;padding:11px 13px;font-size:14px;line-height:1.55;color:var(--ink);box-shadow:var(--shadow);display:flex;gap:9px;align-items:flex-start;}
+.coach .ic{font-size:17px;flex:none;line-height:1.4;}
+.coach .tx{flex:1;}
+.coach b{color:var(--accent);font-weight:700;}
+.coach.warn{background:#fff7ed;color:#9a3412;}
+.coach.warn b{color:#9a3412;}
+:root[data-theme="dark"] .coach.warn{background:#3a2a12;color:#fbbf24;}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .coach.warn{background:#3a2a12;color:#fbbf24;}}
 /* thick 3x3 borders via box-shadow inset on grid using nth positions */
 .cell[data-r="2"],.cell[data-r="5"]{box-shadow:inset 0 -2px 0 var(--line-strong);}
 .cell[data-c="2"],.cell[data-c="5"]{box-shadow:inset -2px 0 0 var(--line-strong);}
@@ -221,6 +232,7 @@ body{
       <div class="board" id="board"></div>
       <div class="loading" id="loading"><div class="spin"></div><div>產生題目中…</div></div>
     </div>
+    <div class="coach" id="coachBar" hidden></div>
     <div class="pad" id="pad"></div>
     <div class="tools">
       <button class="tool" id="undoBtn"><span class="ic">↩︎</span>撤銷</button>
@@ -280,14 +292,14 @@ body{
 <script>
 "use strict";
 /* ============ 資料 ============ */
-// tier=允許用到的最高階人類技巧；floor=挖到剩幾格提示就停
-// 全部 tier:1 = 只用「單元素」(某數在一宮/行/列只能放這格、或這格只剩一個數)即可解，
-// 保證「隨時都有一格能靠掃描填出來」，永遠不會卡到要抓數三/隱數對。難度只由空格多寡決定。
+// 難度＝要學會的新招式（tier）；floor=挖到剩幾格提示就停。
+// T1 裸單元素｜T2 +宮隱單｜T3 +行列隱單｜T4 +區塊排除。每級都保證「用低一級解不開」＝新招真的被練到，
+// 且全程不試誤、每一步都能靠推理找到（教練提示會用人話解釋當下該用的招）。
 const DIFFS=[
-  {key:'easy',   name:'簡單', tier:1, floor:46, sub:'空少、好上手',   color:'#22c55e'},
-  {key:'medium', name:'中等', tier:1, floor:38, sub:'多一點掃描',     color:'#3b82f6'},
-  {key:'hard',   name:'困難', tier:1, floor:30, sub:'要仔細掃',       color:'#f59e0b'},
-  {key:'expert', name:'專家', tier:1, floor:25, sub:'空最多、最燒腦', color:'#ef4444'},
+  {key:'easy',   name:'簡單', tier:1, floor:45, sub:'找唯一空格',   color:'#22c55e'},
+  {key:'medium', name:'中等', tier:2, floor:36, sub:'看一宮排除',   color:'#3b82f6'},
+  {key:'hard',   name:'困難', tier:3, floor:30, sub:'掃整行整列',   color:'#f59e0b'},
+  {key:'expert', name:'專家', tier:4, floor:26, sub:'區塊排除',     color:'#ef4444'},
 ];
 const LEVELS_BATCH=30;           // 一次顯示幾關（按「更多」再加）
 const LS={prog:'sudoku.progress.v1', cur:'sudoku.current.v1', set:'sudoku.settings.v1', ip:'sudoku.inprogress.v1', last:'sudoku.lastplayed.v1'};
@@ -345,78 +357,60 @@ const PEERS=(()=>{const P=[];for(let p=0;p<81;p++){const s=new Set();
   s.delete(p);P.push([...s]);}return P;})();
 const _pc=m=>{let n=0;while(m){m&=m-1;n++;}return n;};
 const _bit=n=>1<<(n-1);
-function humanSolve(puzzle,tier){
-  const val=puzzle.slice(),cand=new Array(81).fill(0);
-  for(let p=0;p<81;p++)if(val[p]===0){let m=0;for(let n=1;n<=9;n++)if(valid(val,p,n))m|=_bit(n);cand[p]=m;}
+function candsOf(val){const c=new Array(81).fill(0);
+  for(let p=0;p<81;p++)if(val[p]===0){let m=0;for(let n=1;n<=9;n++)if(valid(val,p,n))m|=_bit(n);c[p]=m;}return c;}
+// 找一個可填的格（單元素類），限定 maxTier(1裸單/2宮隱單/3行列隱單)：回傳 {p,n,tier,unit} 或 null
+function findFill(val,cand,maxTier){
+  for(let p=0;p<81;p++)if(val[p]===0&&_pc(cand[p])===1)return{p,n:Math.log2(cand[p])+1,tier:1,unit:null};
+  if(maxTier>=2)for(let bi=18;bi<27;bi++){const u=UNITS[bi];for(let n=1;n<=9;n++){const b=_bit(n);let w=-1,c=0;
+    for(const p of u)if(val[p]===0&&(cand[p]&b)){w=p;c++;}if(c===1)return{p:w,n,tier:2,unit:{kind:'宮',cells:u}};}}
+  if(maxTier>=3)for(let ui=0;ui<18;ui++){const u=UNITS[ui];for(let n=1;n<=9;n++){const b=_bit(n);let w=-1,c=0;
+    for(const p of u)if(val[p]===0&&(cand[p]&b)){w=p;c++;}if(c===1)return{p:w,n,tier:3,unit:{kind:ui<9?'列':'行',cells:u}};}}
+  return null;}
+// 區塊排除（pointing/claiming）消一輪候選，回傳是否有進展
+function doLocked(val,cand){let did=false;
+  for(let bi=18;bi<27;bi++){const box=UNITS[bi];for(let n=1;n<=9;n++){const b=_bit(n);
+    const cs=box.filter(p=>val[p]===0&&(cand[p]&b));if(cs.length<2)continue;
+    const rs=new Set(cs.map(p=>(p/9|0))),co=new Set(cs.map(p=>p%9));
+    if(rs.size===1){const r=[...rs][0];for(let c=0;c<9;c++){const q=r*9+c;if(!box.includes(q)&&(cand[q]&b)){cand[q]&=~b;did=true;}}}
+    if(co.size===1){const c=[...co][0];for(let r=0;r<9;r++){const q=r*9+c;if(!box.includes(q)&&(cand[q]&b)){cand[q]&=~b;did=true;}}}}}
+  if(did)return true;
+  for(let ui=0;ui<18;ui++){const u=UNITS[ui];for(let n=1;n<=9;n++){const b=_bit(n);
+    const cs=u.filter(p=>val[p]===0&&(cand[p]&b));if(cs.length<2)continue;
+    const bx=new Set(cs.map(p=>{const r=(p/9|0),c=p%9;return (r/3|0)*3+(c/3|0);}));
+    if(bx.size===1){const box=UNITS[18+[...bx][0]];for(const q of box)if(!u.includes(q)&&val[q]===0&&(cand[q]&b)){cand[q]&=~b;did=true;}}}}
+  return did;}
+// 只用到 maxTier 招式解題，能全解回 true（T1裸單 T2+宮隱單 T3+行列隱單 T4+區塊排除）
+function solveTier(puzzle,maxTier){const val=puzzle.slice();const cand=candsOf(val);
   const place=(p,n)=>{val[p]=n;cand[p]=0;for(const q of PEERS[p])cand[q]&=~_bit(n);};
-  let prog=true;
-  while(prog){
-    prog=false;
-    for(let p=0;p<81;p++)if(val[p]===0&&_pc(cand[p])===1){place(p,Math.log2(cand[p])+1);prog=true;}
-    if(prog)continue;
-    for(const u of UNITS)for(let n=1;n<=9;n++){const b=_bit(n);let w=-1,c=0;
-      for(const p of u)if(val[p]===0&&(cand[p]&b)){w=p;c++;}
-      if(c===1){place(w,n);prog=true;}}
-    if(prog)continue;
-    if(tier<2)break;
-    // 區塊排除（pointing）：宮內某數只落在同一行/列 → 清掉該行/列宮外的
-    for(let bi=18;bi<27;bi++){const box=UNITS[bi];
-      for(let n=1;n<=9;n++){const b=_bit(n);const cs=box.filter(p=>val[p]===0&&(cand[p]&b));
-        if(cs.length<2)continue;
-        const rs=new Set(cs.map(p=>(p/9|0))),cols=new Set(cs.map(p=>p%9));
-        if(rs.size===1){const r=[...rs][0];for(let c=0;c<9;c++){const q=r*9+c;
-          if(!box.includes(q)&&(cand[q]&b)){cand[q]&=~b;prog=true;}}}
-        if(cols.size===1){const c=[...cols][0];for(let r=0;r<9;r++){const q=r*9+c;
-          if(!box.includes(q)&&(cand[q]&b)){cand[q]&=~b;prog=true;}}}}}
-    if(prog)continue;
-    // claiming：行/列內某數只落在同一宮 → 清掉該宮其餘
-    for(let ui=0;ui<18;ui++){const u=UNITS[ui];
-      for(let n=1;n<=9;n++){const b=_bit(n);const cs=u.filter(p=>val[p]===0&&(cand[p]&b));
-        if(cs.length<2)continue;
-        const bx=new Set(cs.map(p=>{const r=(p/9|0),c=p%9;return (r/3|0)*3+(c/3|0);}));
-        if(bx.size===1){const box=UNITS[18+[...bx][0]];
-          for(const q of box)if(!u.includes(q)&&val[q]===0&&(cand[q]&b)){cand[q]&=~b;prog=true;}}}}
-    if(prog)continue;
-    // 裸數對 / 裸數三
-    for(const u of UNITS){const em=u.filter(p=>val[p]===0);
-      for(let i=0;i<em.length&&!prog;i++)for(let j=i+1;j<em.length;j++){
-        const m=cand[em[i]]|cand[em[j]];
-        if(_pc(cand[em[i]])<=2&&_pc(cand[em[j]])<=2&&_pc(m)===2){
-          for(const p of em)if(p!==em[i]&&p!==em[j]&&(cand[p]&m)){cand[p]&=~m;prog=true;}}}
-      if(prog)break;
-      for(let i=0;i<em.length&&!prog;i++)for(let j=i+1;j<em.length;j++)for(let k=j+1;k<em.length;k++){
-        const m=cand[em[i]]|cand[em[j]]|cand[em[k]];
-        if(_pc(m)===3){for(const p of em)if(p!==em[i]&&p!==em[j]&&p!==em[k]&&(cand[p]&m)){cand[p]&=~m;prog=true;}}}
-      if(prog)break;}
-    if(prog)continue;
-    // 隱數對
-    for(const u of UNITS){for(let a=1;a<=9&&!prog;a++)for(let bb=a+1;bb<=9;bb++){
-      const ba=_bit(a),b2=_bit(bb);
-      const ca=u.filter(p=>val[p]===0&&(cand[p]&ba)),cb=u.filter(p=>val[p]===0&&(cand[p]&b2));
-      if(ca.length===2&&cb.length===2&&ca[0]===cb[0]&&ca[1]===cb[1]){
-        const keep=ba|b2;for(const p of ca)if(cand[p]&~keep){cand[p]&=keep;prog=true;}}}
-      if(prog)break;}
-  }
-  return val.every(x=>x!==0);
-}
+  for(;;){const f=findFill(val,cand,maxTier>=3?3:maxTier);if(f){place(f.p,f.n);continue;}
+    if(maxTier>=4&&doLocked(val,cand))continue;break;}
+  return val.every(x=>x!==0);}
+// 教練提示：從目前盤面找「下一步可填的格」＋理由。回傳 {p,n,tier,unit,needLocked} 或 null
+function nextHint(board){const val=board.slice();const cand=candsOf(val);
+  let f=findFill(val,cand,3);if(f)return{...f,needLocked:false};
+  for(let g=0;g<40;g++){if(!doLocked(val,cand))break;f=findFill(val,cand,3);if(f)return{...f,needLocked:true};}
+  return null;}
+// 生成：確定性重試——同 seedNum 保證同結果；每級要求「用低一級解不開」＝新招真的被練到
 function generate(di,seedNum){
-  const rng=mulberry32(seedNum);
-  const solution=new Array(81).fill(0);
-  solveFull(solution,rng);
-  const puzzle=solution.slice();
-  const {tier,floor}=DIFFS[di];
-  const order=shuffle([...Array(81).keys()],rng);
-  let clues=81;
-  for(const pos of order){
-    if(clues<=floor)break;
-    const bak=puzzle[pos];
-    if(bak===0)continue;
-    puzzle[pos]=0;
-    const test=puzzle.slice();
-    // 唯一解 且 純邏輯(該難度技巧範圍內)可解，才真的挖掉
-    if(countSolutions(test,2)!==1||!humanSolve(puzzle,tier)){puzzle[pos]=bak;}else{clues--;}
+  const {tier,floor}=DIFFS[di];let last=null;
+  for(let attempt=0;attempt<80;attempt++){
+    const seed=(seedNum^Math.imul(attempt+1,0x9E3779B1))>>>0;
+    const rng=mulberry32(seed);
+    const solution=new Array(81).fill(0);solveFull(solution,rng);
+    const puzzle=solution.slice();
+    const order=shuffle([...Array(81).keys()],rng);
+    let clues=81;
+    for(const pos of order){
+      if(clues<=floor)break;
+      const bak=puzzle[pos];if(bak===0)continue;
+      puzzle[pos]=0;const test=puzzle.slice();
+      if(countSolutions(test,2)!==1||!solveTier(puzzle,tier)){puzzle[pos]=bak;}else{clues--;}
+    }
+    last={puzzle,solution};
+    if(tier===1||!solveTier(puzzle,tier-1))return {puzzle,solution};
   }
-  return {puzzle,solution};
+  return last;
 }
 
 /* ============ 狀態 ============ */
@@ -626,6 +620,7 @@ function startTimer(){
 
 /* ---- 棋盤 ---- */
 function buildBoard(){
+  coachHide();
   const board=document.getElementById('board');board.innerHTML='';
   for(let i=0;i<81;i++){
     const c=document.createElement('div');
@@ -649,6 +644,7 @@ function renderCells(){
     if(S.sel>=0&&i!==S.sel&&(r===selR||c===selC||b===selB))cls+=' peer';
     if(selVal&&v===selVal&&i!==S.sel)cls+=' same';
     if(i===S.sel)cls+=' sel';
+    if(S.coachCells&&S.coachCells.includes(i))cls+=' coachhi';
     if(settings.showErr&&v!==0&&!fixed&&v!==S.solution[i])cls+=' wrong';
     cell.className=cls;
     if(v!==0){cell.textContent=v;}
@@ -696,6 +692,7 @@ function inputNumber(n){
   if(S.done||S.sel<0)return;
   const i=S.sel;
   if(S.puzzle[i]!==0)return; // 題目給定不可改
+  if(S.coach||S.coachCells)coachHide();
   if(S.notesMode){
     pushHistory();
     if(S.values[i]!==0)S.values[i]=0;
@@ -723,29 +720,65 @@ function removeNote(idx,n){const arr=S.notes[idx];if(!arr)return;const k=arr.ind
 function eraseCell(){
   if(S.done||S.sel<0)return;const i=S.sel;if(S.puzzle[i]!==0)return;
   if(S.values[i]===0&&(!S.notes[i]||!S.notes[i].length))return;
+  if(S.coach||S.coachCells)coachHide();
   pushHistory();S.values[i]=0;S.notes[i]=[];if(S.hintCells)S.hintCells.delete(i);
   renderCells();updatePad();updateTools();saveCurrent();
 }
 function undo(){
   if(S.done||!S.history.length)return;
+  if(S.coach||S.coachCells)coachHide();
   const h=S.history.pop();
   S.values=h.values;S.notes=h.notes;S.mist=h.mist;S.hintCells=new Set(h.hintCells);
   refreshHeader();renderCells();updatePad();updateTools();saveCurrent();
 }
 function toggleNotes(){S.notesMode=!S.notesMode;updateTools();}
+/* ---- 教練式提示：指方向 → 講理由 → 指格＋答案（第0層先擋填錯）---- */
+function boxPos(p){return ['左','中','右'][(p%9/3|0)]+['上','中','下'][((p/9|0)/3|0)]+'宮';}
+function describeUnit(h){
+  if(!h.unit||h.unit.kind==='宮')return boxPos(h.p);
+  if(h.unit.kind==='列')return '第'+((h.p/9|0)+1)+'列（橫排）';
+  return '第'+(h.p%9+1)+'行（直排）';
+}
+function coachSay(html,warn){const el=document.getElementById('coachBar');
+  el.hidden=false;el.className='coach'+(warn?' warn':'');
+  el.innerHTML='<span class="ic">'+(warn?'⚠️':'🧭')+'</span><span class="tx">'+html+'</span>';}
+function coachHide(){const el=document.getElementById('coachBar');if(el)el.hidden=true;if(S){S.coach=null;S.coachCells=null;}}
+function findWrong(){for(let i=0;i<81;i++)if(S.puzzle[i]===0&&S.values[i]!==0&&S.values[i]!==S.solution[i])return i;return -1;}
 function hint(){
   if(S.done)return;
-  let i=S.sel;
-  if(i<0||S.values[i]!==0||S.puzzle[i]!==0){
-    const empties=[];for(let k=0;k<81;k++)if(S.values[k]===0)empties.push(k);
-    if(!empties.length)return;i=empties[Math.floor(Math.random()*empties.length)];S.sel=i;
+  // 第0層：盤面有填錯先擋，不給假線索
+  const w=findWrong();
+  if(w>=0){S.coach=null;S.coachCells=[w];
+    coachSay('先等一下——你有一格<b>填錯了</b>（在「'+boxPos(w)+'」那區）。先把它擦掉再繼續，不然會卡住喔。',true);
+    renderCells();return;}
+  const h=nextHint(S.values);
+  if(!h){coachSay('這一題目前沒有可以再推的空格了。');return;}
+  const key=h.p+':'+h.n;
+  const layer=(S.coach&&S.coach.key===key)?Math.min(3,S.coach.layer+1):1;
+  S.coach={key,layer};
+  const unit=describeUnit(h);
+  // 方向/理由層高亮整個「區域」（裸單元素→該格所在的宮），指格層才只亮那一格
+  const region=h.unit?h.unit.cells.slice():UNITS[18+((h.p/9|0)/3|0)*3+((h.p%9)/3|0)].slice();
+  if(layer===1){
+    S.coachCells=region;
+    coachSay((h.needLocked?'這一步要先用「<b>區塊排除</b>」。先看看':'先看看')+'「<b>'+unit+'</b>」，答案就在這一區裡。');
+  }else if(layer===2){
+    S.coachCells=region;
+    let reason=h.tier===1
+      ? '這一區裡有一格，除了 <b>'+h.n+'</b> 以外，其他數字在它的同排、同宮都出現過了，所以只能是 '+h.n+'。'
+      : '在「<b>'+unit+'</b>」裡，數字 <b>'+h.n+'</b> 只剩一個位置放得下——別的格子都被同排或同宮已經有的 '+h.n+' 擋住了。';
+    if(h.needLocked)reason='先用「<b>區塊排除</b>」：找一個宮，裡面的 '+h.n+' 剛好被逼在同一排上，就能把那一排其他格的 '+h.n+' 劃掉。之後你會發現——'+reason;
+    coachSay(reason);
+  }else{
+    S.coachCells=[h.p];S.sel=h.p;
+    coachSay('就是<b>亮起來這一格</b>，填 <b>'+h.n+'</b>。');
+    pushHistory();S.values[h.p]=h.n;S.notes[h.p]=[];
+    if(!S.hintCells)S.hintCells=new Set();S.hintCells.add(h.p);
+    S.hints++;S.coach=null;
+    updatePad();saveCurrent();
   }
-  if(S.values[i]!==0&&S.values[i]===S.solution[i])return;
-  pushHistory();
-  S.values[i]=S.solution[i];S.notes[i]=[];
-  if(!S.hintCells)S.hintCells=new Set();S.hintCells.add(i);
-  S.hints++;
-  renderCells();updatePad();updateTools();saveCurrent();checkWin();
+  renderCells();updateTools();
+  if(layer===3)checkWin();
 }
 function updateTools(){
   document.getElementById('notesBtn').classList.toggle('on',S.notesMode);

@@ -31,10 +31,10 @@ final class ReasoningTraceTests: XCTestCase {
         }
     }
 
-    /// tier 1 難度的軌跡只能出現單元素技巧；不得混入 tier 2 技巧。
+    /// 全難度都是 tier 1（967155d）：軌跡只能出現單元素技巧，不得混入 tier 2 技巧。
     func testTierRestrictionInTrace() {
         let tier1Only: Set<ReasoningStep.Technique> = [.nakedSingle, .hiddenSingle]
-        for diff in [Difficulty.easy, .medium] {
+        for diff in Difficulty.allCases {
             for lv in 1...20 {
                 let g = SudokuGenerator.levelPuzzle(difficulty: diff, level: lv)
                 let r = HumanSolver.solve(g.puzzle, tier: diff.tier, recordTrace: true)
@@ -100,18 +100,30 @@ final class ReasoningTraceTests: XCTestCase {
         XCTAssertFalse(r.steps.isEmpty)
     }
 
-    /// tier 2 進階技巧確實被使用並記入軌跡（掃 50 關專家題，至少要出現一次）。
-    func testAdvancedTechniquesAreExercised() {
+    /// tier 2 進階技巧仍保留在 solver 裡且可用（967155d 後生成不再用它們，
+    /// 但教練層之後要拿它們當「更快的捷徑」教學內容——這裡守住它們別失效）。
+    /// 測試盤：舊 tier-2 規則產生的專家第 1 關（levelSeed(3,1)=seed 2871579000，
+    /// 967155d 前的 JS 版輸出）——已驗證 tier 1 解不開、tier 2 純邏輯可解。
+    func testAdvancedTechniquesStillAvailable() {
+        let puzzle = [0,8,6,2,0,0,9,0,0, 0,0,0,0,5,1,0,0,0, 1,2,0,0,0,0,3,8,0,
+                      0,0,0,9,6,0,7,0,3, 6,0,7,0,0,0,0,0,9, 0,0,2,0,0,0,0,4,0,
+                      0,3,4,0,0,0,0,0,0, 0,0,0,0,8,0,0,0,0, 0,0,0,0,1,5,0,0,4]
+        let solution = [4,8,6,2,3,7,9,1,5, 9,7,3,8,5,1,4,6,2, 1,2,5,4,9,6,3,8,7,
+                        8,4,1,9,6,2,7,5,3, 6,5,7,1,4,3,8,2,9, 3,9,2,5,7,8,6,4,1,
+                        5,3,4,6,2,9,1,7,8, 2,1,9,7,8,4,5,3,6, 7,6,8,3,1,5,2,9,4]
+
+        // tier 1（只單元素）解不開這一題——證明它真的需要進階技巧
+        let r1 = HumanSolver.solve(puzzle, tier: 1, recordTrace: false)
+        XCTAssertFalse(r1.solved, "此盤面理應單元素解不開（否則測試盤選錯了）")
+
+        // tier 2 純邏輯解得開、解＝正解，且軌跡確實用到進階技巧
+        let r2 = HumanSolver.solve(puzzle, tier: 2, recordTrace: true)
+        XCTAssertTrue(r2.solved, "tier 2 技巧應能純邏輯解開此盤，進階分支可能失效")
+        XCTAssertEqual(r2.values, solution, "tier 2 邏輯解與正解不一致")
+
         let advanced: Set<ReasoningStep.Technique> = [.pointing, .claiming, .nakedPair, .nakedTriple, .hiddenPair]
-        var seen = Set<ReasoningStep.Technique>()
-        for lv in 1...50 {
-            let g = SudokuGenerator.levelPuzzle(difficulty: .expert, level: lv)
-            let r = HumanSolver.solve(g.puzzle, tier: g.difficulty.tier, recordTrace: true)
-            for step in r.steps where advanced.contains(step.technique) {
-                seen.insert(step.technique)
-            }
-        }
-        XCTAssertFalse(seen.isEmpty, "50 關專家題中沒有任何進階技巧被使用，humanSolve 進階分支可能失效")
-        print("🧠 專家題用到的進階技巧：\(seen.map { $0.displayName }.sorted().joined(separator: "、"))")
+        let seen = Set(r2.steps.map { $0.technique }).intersection(advanced)
+        XCTAssertFalse(seen.isEmpty, "tier 2 解題軌跡中沒有任何進階技巧，humanSolve 進階分支可能失效")
+        print("🧠 tier 2 測試盤用到的進階技巧：\(seen.map { $0.displayName }.sorted().joined(separator: "、"))")
     }
 }

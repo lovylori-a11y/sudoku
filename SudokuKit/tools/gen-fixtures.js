@@ -9,10 +9,10 @@
 
 /* ---- 以下區塊逐字複製自 index.html（勿改）---- */
 const DIFFS=[
-  {key:'easy',   name:'簡單', tier:1, floor:44, sub:'掃描就能解',   color:'#22c55e'},
-  {key:'medium', name:'中等', tier:1, floor:34, sub:'需要一點推理', color:'#3b82f6'},
-  {key:'hard',   name:'困難', tier:2, floor:30, sub:'要動點腦',     color:'#f59e0b'},
-  {key:'expert', name:'專家', tier:2, floor:24, sub:'高手挑戰',     color:'#ef4444'},
+  {key:'easy',   name:'簡單', tier:1, floor:46, sub:'空少、好上手',   color:'#22c55e'},
+  {key:'medium', name:'中等', tier:1, floor:38, sub:'多一點掃描',     color:'#3b82f6'},
+  {key:'hard',   name:'困難', tier:1, floor:30, sub:'要仔細掃',       color:'#f59e0b'},
+  {key:'expert', name:'專家', tier:1, floor:25, sub:'空最多、最燒腦', color:'#ef4444'},
 ];
 function mulberry32(seed){let a=seed>>>0;return function(){a|=0;a=a+0x6D2B79F5|0;
   let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}

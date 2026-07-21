@@ -1,8 +1,8 @@
 import XCTest
 @testable import SudokuKit
 
-/// 200 題品質驗證：對照 PWA 2026-07-11 升級的三條保證——
-/// 唯一解、該難度 0 題需猜（純邏輯可解）、邏輯解＝正解。
+/// 200 題品質驗證：對照 PWA 的三條保證（2026-07-17 commit 967155d 起全難度 tier:1）——
+/// 唯一解、0 題需要「單元素以外的技巧」（掃描可解、隨時有一格填得出）、掃描解＝正解。
 final class ValidationTests: XCTestCase {
 
     /// 四難度 × 各 50 關 = 200 題，逐題驗證所有性質。
@@ -27,10 +27,11 @@ final class ValidationTests: XCTestCase {
                 XCTAssertEqual(SudokuCore.countSolutions(g.puzzle, limit: 2), 1,
                     "\(where_)：非唯一解")
 
-                // 4) 該難度技巧範圍內、不試誤純邏輯可解，且邏輯解＝正解（0 題需猜）
+                // 4) 全難度 tier 1：只用單元素（掃描）就能解開、不試誤，且掃描解＝正解
+                //    （＝0 題需要單元素以外的技巧，「隨時有一格靠掃描填得出」的保證）
                 let r = HumanSolver.solve(g.puzzle, tier: diff.tier, recordTrace: false)
-                XCTAssertTrue(r.solved, "\(where_)：tier \(diff.tier) 技巧內無法純邏輯解開（需要猜）")
-                XCTAssertEqual(r.values, g.solution, "\(where_)：邏輯解與正解不一致")
+                XCTAssertTrue(r.solved, "\(where_)：單元素技巧內無法解開（違反掃描可解保證）")
+                XCTAssertEqual(r.values, g.solution, "\(where_)：掃描解與正解不一致")
 
                 // 5) 提示數不低於 floor（產生器 clues<=floor 就停）
                 XCTAssertGreaterThanOrEqual(g.clueCount, diff.floor, "\(where_)：提示數 \(g.clueCount) 低於 floor \(diff.floor)")
@@ -42,12 +43,12 @@ final class ValidationTests: XCTestCase {
 
     /// 提示數落點符合各難度預期（防止難度曲線回歸）。
     func testClueCountsPerDifficulty() {
-        // 各難度取樣 30 關看提示數分佈
+        // 各難度取樣 30 關看提示數分佈（967155d：簡單46/中等38/困難30/專家25-27）
         let expected: [Difficulty: (min: Int, max: Int)] = [
-            .easy: (44, 44),
-            .medium: (34, 34),
-            .hard: (30, 32),
-            .expert: (24, 30),
+            .easy: (46, 46),
+            .medium: (38, 38),
+            .hard: (30, 30),
+            .expert: (25, 27),
         ]
         for diff in Difficulty.allCases {
             let range = expected[diff]!
