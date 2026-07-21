@@ -767,15 +767,13 @@ function hint(){
     if(h.needLocked)reason='先用「<b>區塊排除</b>」：找一個宮，裡面的 '+h.n+' 剛好被逼在同一排上，就能把那一排其他格的 '+h.n+' 劃掉。之後你會發現——'+reason;
     coachSay(reason);
   }else{
+    // 永不代填（品牌鐵則）：指出格子＋數字，但讓玩家自己按進去
     S.coachCells=[h.p];S.sel=h.p;
-    coachSay('就是<b>亮起來這一格</b>，填 <b>'+h.n+'</b>。');
-    pushHistory();S.values[h.p]=h.n;S.notes[h.p]=[];
-    if(!S.hintCells)S.hintCells=new Set();S.hintCells.add(h.p);
+    coachSay('就是<b>亮起來這一格</b>，換你把 <b>'+h.n+'</b> 填進去——自己填才算學會 💪');
     S.hints++;S.coach=null;
-    updatePad();saveCurrent();
+    saveCurrent();
   }
   renderCells();updateTools();
-  if(layer===3)checkWin();
 }
 function updateTools(){
   document.getElementById('notesBtn').classList.toggle('on',S.notesMode);
