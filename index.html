@@ -56,12 +56,12 @@ body{
 
 .section-title{font-size:13px;font-weight:700;color:var(--muted);margin:6px 2px 10px;letter-spacing:.4px;}
 
-.diffs{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:16px;}
-.diff{border:2px solid transparent;background:var(--panel);border-radius:14px;padding:13px 14px;
-  text-align:left;cursor:pointer;font-family:inherit;box-shadow:var(--shadow);transition:.12s;}
-.diff .d{width:10px;height:10px;border-radius:50%;display:inline-block;margin-right:7px;vertical-align:middle;}
-.diff .n{font-size:16px;font-weight:700;color:var(--ink);}
-.diff .p{font-size:12px;color:var(--muted);margin-top:4px;}
+.diffs{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin-bottom:16px;}
+.diff{border:2px solid transparent;background:var(--panel);border-radius:13px;padding:11px 6px 10px;
+  text-align:center;cursor:pointer;font-family:inherit;box-shadow:var(--shadow);transition:.12s;}
+.diff .d{width:9px;height:9px;border-radius:50%;display:inline-block;margin-right:5px;vertical-align:middle;}
+.diff .n{font-size:15px;font-weight:700;color:var(--ink);white-space:nowrap;}
+.diff .p{font-size:10.5px;color:var(--muted);margin-top:4px;line-height:1.25;}
 .diff.sel{border-color:var(--accent);}
 
 .tabs{display:flex;gap:8px;background:var(--panel);padding:4px;border-radius:12px;margin-bottom:14px;box-shadow:var(--shadow);}
@@ -191,11 +191,6 @@ body{
       <div class="logo">數</div>
       <div><h1>小數獨<small>免費・無廣告・練習數字推理</small></h1></div>
     </div>
-
-    <button id="continueBtn" class="continue" style="display:none">
-      <div class="t" id="continueTitle">▶ 接續上次</div>
-      <div class="s" id="continueSub"></div>
-    </button>
 
     <div class="section-title">選難度</div>
     <div class="diffs" id="diffs"></div>
@@ -547,7 +542,9 @@ function renderLevels(autoScroll){
   }
 }
 function renderContinue(){
-  const t=continueTarget();const btn=document.getElementById('continueBtn');
+  const btn=document.getElementById('continueBtn');
+  if(!btn)return; // 橫幅已移除；接續改由關卡格的「續」標記呈現
+  const t=continueTarget();
   if(!t){btn.style.display='none';return;}
   const dn=DIFFS[t.di].name;
   const where=t.mode==='infinite'?'無限練習':`第 ${t.level} 關`;
@@ -827,7 +824,8 @@ function bind(){
   document.getElementById('eraseBtn').onclick=eraseCell;
   document.getElementById('notesBtn').onclick=toggleNotes;
   document.getElementById('hintBtn').onclick=hint;
-  document.getElementById('continueBtn').onclick=()=>{
+  const _cb=document.getElementById('continueBtn');
+  if(_cb)_cb.onclick=()=>{
     const t=continueTarget();if(!t)return;
     if(t.mode!=='infinite'&&typeof t.di==='number'){curDiff=t.di;renderDiffs();}
     if(t.kind==='resume')resumeGame(t.snap);
