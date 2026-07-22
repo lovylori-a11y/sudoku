@@ -56,7 +56,7 @@ body{
 
 .section-title{font-size:13px;font-weight:700;color:var(--muted);margin:6px 2px 10px;letter-spacing:.4px;}
 
-.diffs{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin-bottom:16px;}
+.diffs{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-bottom:16px;}
 .diff{border:2px solid transparent;background:var(--panel);border-radius:13px;padding:11px 6px 10px;
   text-align:center;cursor:pointer;font-family:inherit;box-shadow:var(--shadow);transition:.12s;}
 .diff .d{width:9px;height:9px;border-radius:50%;display:inline-block;margin-right:5px;vertical-align:middle;}
@@ -104,7 +104,7 @@ body{
   border-radius:10px;overflow:hidden;display:grid;grid-template-columns:repeat(9,1fr);grid-template-rows:repeat(9,1fr);
   gap:1px;touch-action:manipulation;}
 .cell{background:var(--cell);display:flex;align-items:center;justify-content:center;position:relative;
-  font-size:min(6.4vw,34px);font-weight:600;color:var(--user);cursor:pointer;}
+  font-size:var(--cf,min(6.4vw,34px));font-weight:600;color:var(--user);cursor:pointer;}
 .cell.fixed{background:var(--cell-fixed);color:var(--given);font-weight:700;}
 .cell.peer{background:var(--peer);}
 .cell.fixed.peer{background:var(--cell-fixed);filter:brightness(.97);}
@@ -125,12 +125,8 @@ body{
 .coach.warn b{color:#9a3412;}
 :root[data-theme="dark"] .coach.warn{background:#3a2a12;color:#fbbf24;}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .coach.warn{background:#3a2a12;color:#fbbf24;}}
-/* thick 3x3 borders via box-shadow inset on grid using nth positions */
-.cell[data-r="2"],.cell[data-r="5"]{box-shadow:inset 0 -2px 0 var(--line-strong);}
-.cell[data-c="2"],.cell[data-c="5"]{box-shadow:inset -2px 0 0 var(--line-strong);}
-.cell[data-r="2"][data-c="2"],.cell[data-r="2"][data-c="5"],
-.cell[data-r="5"][data-c="2"],.cell[data-r="5"][data-c="5"]{box-shadow:inset -2px -2px 0 var(--line-strong);}
-.notes{position:absolute;inset:2px;display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(3,1fr);
+/* 宮的粗線改由 buildBoard 依 bh/bw 逐格算 inline box-shadow（沿用 --line-strong，支援任意尺寸） */
+.notes{position:absolute;inset:2px;display:grid;grid-template-columns:repeat(3,1fr);
   pointer-events:none;}
 .notes span{font-size:min(2.3vw,12px);color:var(--muted);display:flex;align-items:center;justify-content:center;line-height:1;}
 
@@ -287,14 +283,15 @@ body{
 <script>
 "use strict";
 /* ============ 資料 ============ */
-// 難度＝要學會的新招式（tier）；floor=挖到剩幾格提示就停。
-// T1 裸單元素｜T2 +宮隱單｜T3 +行列隱單｜T4 +區塊排除。每級都保證「用低一級解不開」＝新招真的被練到，
-// 且全程不試誤、每一步都能靠推理找到（教練提示會用人話解釋當下該用的招）。
+// 連續階梯：尺寸(size)由小到大＋招式(tier)由淺到深。size=盤面邊長(4/6/9)；
+// floor=挖到剩幾格提示就停；strict=要求「用低一級解不開」(只用在 9×9 中等以上，尺寸本身就是難度來源時不強制)。
 const DIFFS=[
-  {key:'easy',   name:'簡單', tier:1, floor:45, sub:'找唯一空格',   color:'#22c55e'},
-  {key:'medium', name:'中等', tier:2, floor:36, sub:'看一宮排除',   color:'#3b82f6'},
-  {key:'hard',   name:'困難', tier:3, floor:30, sub:'掃整行整列',   color:'#f59e0b'},
-  {key:'expert', name:'專家', tier:4, floor:26, sub:'區塊排除',     color:'#ef4444'},
+  {key:'tiny',   name:'幼幼', size:4, tier:1, floor:8,  strict:false, sub:'4×4 入門',   color:'#22c55e'},
+  {key:'mini',   name:'入門', size:6, tier:2, floor:18, strict:false, sub:'6×6 過渡',   color:'#14b8a6'},
+  {key:'easy',   name:'簡單', size:9, tier:1, floor:45, strict:false, sub:'找唯一空格', color:'#3b82f6'},
+  {key:'medium', name:'中等', size:9, tier:2, floor:36, strict:true,  sub:'看一宮排除', color:'#8b5cf6'},
+  {key:'hard',   name:'困難', size:9, tier:3, floor:30, strict:true,  sub:'掃整行整列', color:'#f59e0b'},
+  {key:'expert', name:'專家', size:9, tier:4, floor:26, strict:true,  sub:'區塊排除',   color:'#ef4444'},
 ];
 const LEVELS_BATCH=30;           // 一次顯示幾關（按「更多」再加）
 const LS={prog:'sudoku.progress.v1', cur:'sudoku.current.v1', set:'sudoku.settings.v1', ip:'sudoku.inprogress.v1', last:'sudoku.lastplayed.v1'};
@@ -305,108 +302,84 @@ function mulberry32(seed){let a=seed>>>0;return function(){a|=0;a=a+0x6D2B79F5|0
 function shuffle(arr,rng){for(let i=arr.length-1;i>0;i--){const j=Math.floor(rng()*(i+1));[arr[i],arr[j]]=[arr[j],arr[i]];}return arr;}
 function levelSeed(di,lv){let h=(2166136261^di)>>>0;h=Math.imul(h^lv,16777619);h=Math.imul(h^(lv>>>8),16777619);h=Math.imul(h^(lv>>>16),16777619);return h>>>0;}
 
-/* ============ 數獨引擎 ============ */
-function valid(b,pos,n){
-  const r=(pos/9)|0,c=pos%9;
-  for(let i=0;i<9;i++){if(b[r*9+i]===n)return false;if(b[i*9+c]===n)return false;}
-  const br=(r/3|0)*3,bc=(c/3|0)*3;
-  for(let i=0;i<3;i++)for(let j=0;j<3;j++)if(b[(br+i)*9+(bc+j)]===n)return false;
-  return true;
-}
-function solveFull(b,rng){
-  const pos=b.indexOf(0);
-  if(pos===-1)return true;
-  const nums=shuffle([1,2,3,4,5,6,7,8,9],rng);
-  for(const n of nums){if(valid(b,pos,n)){b[pos]=n;if(solveFull(b,rng))return true;b[pos]=0;}}
-  return false;
-}
-// 用 MRV（最少候選格優先）數解，最多數到 limit
-function countSolutions(b,limit){
-  let best=-1,bestC=null;
-  for(let p=0;p<81;p++){
-    if(b[p]!==0)continue;
-    const cand=[];
-    for(let n=1;n<=9;n++)if(valid(b,p,n))cand.push(n);
-    if(cand.length===0)return 0;
-    if(cand.length===1){b[p]=cand[0];const r=countSolutions(b,limit);b[p]=0;return r;}
-    if(best===-1||cand.length<bestC.length){best=p;bestC=cand;}
-  }
-  if(best===-1)return 1; // 全填滿
-  let count=0;
-  for(const n of bestC){b[best]=n;count+=countSolutions(b,limit);b[best]=0;if(count>=limit)break;}
-  return count;
-}
-/* ---- 人類技巧解題器：只用人會用的推理，不准試誤 ----
-   用來保證題目「不靠猜、純邏輯就能解開」。
-   tier 1 = 只用單元素(naked/hidden single)；tier 2 = 再加 區塊排除 + 數對/數三/隱數對 */
-const UNITS=(()=>{const u=[];
-  for(let r=0;r<9;r++){const a=[];for(let c=0;c<9;c++)a.push(r*9+c);u.push(a);}
-  for(let c=0;c<9;c++){const a=[];for(let r=0;r<9;r++)a.push(r*9+c);u.push(a);}
-  for(let br=0;br<3;br++)for(let bc=0;bc<3;bc++){const a=[];
-    for(let i=0;i<3;i++)for(let j=0;j<3;j++)a.push((br*3+i)*9+(bc*3+j));u.push(a);}
-  return u;})();
-const PEERS=(()=>{const P=[];for(let p=0;p<81;p++){const s=new Set();
-  const r=(p/9|0),c=p%9,br=(r/3|0)*3,bc=(c/3|0)*3;
-  for(let i=0;i<9;i++){s.add(r*9+i);s.add(i*9+c);}
-  for(let i=0;i<3;i++)for(let j=0;j<3;j++)s.add((br+i)*9+(bc+j));
-  s.delete(p);P.push([...s]);}return P;})();
+/* ============ 數獨引擎（泛化工廠：支援 4x4/6x6/9x9） ============ */
 const _pc=m=>{let n=0;while(m){m&=m-1;n++;}return n;};
 const _bit=n=>1<<(n-1);
-function candsOf(val){const c=new Array(81).fill(0);
-  for(let p=0;p<81;p++)if(val[p]===0){let m=0;for(let n=1;n<=9;n++)if(valid(val,p,n))m|=_bit(n);c[p]=m;}return c;}
-// 找一個可填的格（單元素類），限定 maxTier(1裸單/2宮隱單/3行列隱單)：回傳 {p,n,tier,unit} 或 null
-function findFill(val,cand,maxTier){
-  for(let p=0;p<81;p++)if(val[p]===0&&_pc(cand[p])===1)return{p,n:Math.log2(cand[p])+1,tier:1,unit:null};
-  if(maxTier>=2)for(let bi=18;bi<27;bi++){const u=UNITS[bi];for(let n=1;n<=9;n++){const b=_bit(n);let w=-1,c=0;
-    for(const p of u)if(val[p]===0&&(cand[p]&b)){w=p;c++;}if(c===1)return{p:w,n,tier:2,unit:{kind:'宮',cells:u}};}}
-  if(maxTier>=3)for(let ui=0;ui<18;ui++){const u=UNITS[ui];for(let n=1;n<=9;n++){const b=_bit(n);let w=-1,c=0;
-    for(const p of u)if(val[p]===0&&(cand[p]&b)){w=p;c++;}if(c===1)return{p:w,n,tier:3,unit:{kind:ui<9?'列':'行',cells:u}};}}
-  return null;}
-// 區塊排除（pointing/claiming）消一輪候選，回傳是否有進展
-function doLocked(val,cand){let did=false;
-  for(let bi=18;bi<27;bi++){const box=UNITS[bi];for(let n=1;n<=9;n++){const b=_bit(n);
-    const cs=box.filter(p=>val[p]===0&&(cand[p]&b));if(cs.length<2)continue;
-    const rs=new Set(cs.map(p=>(p/9|0))),co=new Set(cs.map(p=>p%9));
-    if(rs.size===1){const r=[...rs][0];for(let c=0;c<9;c++){const q=r*9+c;if(!box.includes(q)&&(cand[q]&b)){cand[q]&=~b;did=true;}}}
-    if(co.size===1){const c=[...co][0];for(let r=0;r<9;r++){const q=r*9+c;if(!box.includes(q)&&(cand[q]&b)){cand[q]&=~b;did=true;}}}}}
-  if(did)return true;
-  for(let ui=0;ui<18;ui++){const u=UNITS[ui];for(let n=1;n<=9;n++){const b=_bit(n);
-    const cs=u.filter(p=>val[p]===0&&(cand[p]&b));if(cs.length<2)continue;
-    const bx=new Set(cs.map(p=>{const r=(p/9|0),c=p%9;return (r/3|0)*3+(c/3|0);}));
-    if(bx.size===1){const box=UNITS[18+[...bx][0]];for(const q of box)if(!u.includes(q)&&val[q]===0&&(cand[q]&b)){cand[q]&=~b;did=true;}}}}
-  return did;}
-// 只用到 maxTier 招式解題，能全解回 true（T1裸單 T2+宮隱單 T3+行列隱單 T4+區塊排除）
-function solveTier(puzzle,maxTier){const val=puzzle.slice();const cand=candsOf(val);
-  const place=(p,n)=>{val[p]=n;cand[p]=0;for(const q of PEERS[p])cand[q]&=~_bit(n);};
-  for(;;){const f=findFill(val,cand,maxTier>=3?3:maxTier);if(f){place(f.p,f.n);continue;}
-    if(maxTier>=4&&doLocked(val,cand))continue;break;}
-  return val.every(x=>x!==0);}
-// 教練提示：從目前盤面找「下一步可填的格」＋理由。回傳 {p,n,tier,unit,needLocked} 或 null
-function nextHint(board){const val=board.slice();const cand=candsOf(val);
-  let f=findFill(val,cand,3);if(f)return{...f,needLocked:false};
-  for(let g=0;g<40;g++){if(!doLocked(val,cand))break;f=findFill(val,cand,3);if(f)return{...f,needLocked:true};}
-  return null;}
-// 生成：確定性重試——同 seedNum 保證同結果；每級要求「用低一級解不開」＝新招真的被練到
-function generate(di,seedNum){
-  const {tier,floor}=DIFFS[di];let last=null;
-  for(let attempt=0;attempt<80;attempt++){
-    const seed=(seedNum^Math.imul(attempt+1,0x9E3779B1))>>>0;
-    const rng=mulberry32(seed);
-    const solution=new Array(81).fill(0);solveFull(solution,rng);
-    const puzzle=solution.slice();
-    const order=shuffle([...Array(81).keys()],rng);
-    let clues=81;
-    for(const pos of order){
-      if(clues<=floor)break;
-      const bak=puzzle[pos];if(bak===0)continue;
-      puzzle[pos]=0;const test=puzzle.slice();
-      if(countSolutions(test,2)!==1||!solveTier(puzzle,tier)){puzzle[pos]=bak;}else{clues--;}
-    }
-    last={puzzle,solution};
-    if(tier===1||!solveTier(puzzle,tier-1))return {puzzle,solution};
-  }
-  return last;
+const SIZES={4:[2,2],6:[2,3],9:[3,3]}; // 邊長→[宮高,宮寬]
+function makeEngine(N,bh,bw){
+  const CELLS=N*N, boxCols=N/bw, BOX0=2*N;
+  const boxOf=p=>{const r=(p/N|0),c=p%N;return Math.floor(r/bh)*boxCols+Math.floor(c/bw);};
+  const UNITS=[]; // 0..N-1 列, N..2N-1 行, 2N..3N-1 宮
+  for(let r=0;r<N;r++){const a=[];for(let c=0;c<N;c++)a.push(r*N+c);UNITS.push(a);}
+  for(let c=0;c<N;c++){const a=[];for(let r=0;r<N;r++)a.push(r*N+c);UNITS.push(a);}
+  for(let br=0;br<N/bh;br++)for(let bc=0;bc<boxCols;bc++){const a=[];
+    for(let i=0;i<bh;i++)for(let j=0;j<bw;j++)a.push((br*bh+i)*N+(bc*bw+j));UNITS.push(a);}
+  const PEERS=[];
+  for(let p=0;p<CELLS;p++){const s=new Set();const r=(p/N|0),c=p%N;
+    for(let i=0;i<N;i++){s.add(r*N+i);s.add(i*N+c);}
+    const br=Math.floor(r/bh)*bh,bc=Math.floor(c/bw)*bw;
+    for(let i=0;i<bh;i++)for(let j=0;j<bw;j++)s.add((br+i)*N+(bc+j));
+    s.delete(p);PEERS.push([...s]);}
+  function valid(b,pos,n){const r=(pos/N|0),c=pos%N;
+    for(let i=0;i<N;i++){if(b[r*N+i]===n)return false;if(b[i*N+c]===n)return false;}
+    const br=Math.floor(r/bh)*bh,bc=Math.floor(c/bw)*bw;
+    for(let i=0;i<bh;i++)for(let j=0;j<bw;j++)if(b[(br+i)*N+(bc+j)]===n)return false;return true;}
+  function solveFull(b,rng){const p=b.indexOf(0);if(p===-1)return true;
+    const ns=shuffle(Array.from({length:N},(_,i)=>i+1),rng);
+    for(const n of ns){if(valid(b,p,n)){b[p]=n;if(solveFull(b,rng))return true;b[p]=0;}}return false;}
+  function countSolutions(b,limit){let best=-1,bc2=null;for(let p=0;p<CELLS;p++){if(b[p]!==0)continue;const cd=[];
+    for(let n=1;n<=N;n++)if(valid(b,p,n))cd.push(n);if(!cd.length)return 0;
+    if(cd.length===1){b[p]=cd[0];const r=countSolutions(b,limit);b[p]=0;return r;}
+    if(best===-1||cd.length<bc2.length){best=p;bc2=cd;}}if(best===-1)return 1;let cnt=0;
+    for(const n of bc2){b[best]=n;cnt+=countSolutions(b,limit);b[best]=0;if(cnt>=limit)break;}return cnt;}
+  function candsOf(val){const c=new Array(CELLS).fill(0);
+    for(let p=0;p<CELLS;p++)if(val[p]===0){let m=0;for(let n=1;n<=N;n++)if(valid(val,p,n))m|=_bit(n);c[p]=m;}return c;}
+  function findFill(val,cand,maxTier){
+    for(let p=0;p<CELLS;p++)if(val[p]===0&&_pc(cand[p])===1)return{p,n:Math.log2(cand[p])+1,tier:1,unit:null};
+    if(maxTier>=2)for(let bi=BOX0;bi<3*N;bi++){const u=UNITS[bi];for(let n=1;n<=N;n++){const b=_bit(n);let w=-1,c=0;
+      for(const p of u)if(val[p]===0&&(cand[p]&b)){w=p;c++;}if(c===1)return{p:w,n,tier:2,unit:{kind:'宮',cells:u}};}}
+    if(maxTier>=3)for(let ui=0;ui<2*N;ui++){const u=UNITS[ui];for(let n=1;n<=N;n++){const b=_bit(n);let w=-1,c=0;
+      for(const p of u)if(val[p]===0&&(cand[p]&b)){w=p;c++;}if(c===1)return{p:w,n,tier:3,unit:{kind:ui<N?'列':'行',cells:u}};}}
+    return null;}
+  function doLocked(val,cand){let did=false;
+    for(let bi=BOX0;bi<3*N;bi++){const box=UNITS[bi];for(let n=1;n<=N;n++){const b=_bit(n);
+      const cs=box.filter(p=>val[p]===0&&(cand[p]&b));if(cs.length<2)continue;
+      const rs=new Set(cs.map(p=>(p/N|0))),co=new Set(cs.map(p=>p%N));
+      if(rs.size===1){const r=[...rs][0];for(let c=0;c<N;c++){const q=r*N+c;if(!box.includes(q)&&(cand[q]&b)){cand[q]&=~b;did=true;}}}
+      if(co.size===1){const c=[...co][0];for(let r=0;r<N;r++){const q=r*N+c;if(!box.includes(q)&&(cand[q]&b)){cand[q]&=~b;did=true;}}}}}
+    if(did)return true;
+    for(let ui=0;ui<2*N;ui++){const u=UNITS[ui];for(let n=1;n<=N;n++){const b=_bit(n);
+      const cs=u.filter(p=>val[p]===0&&(cand[p]&b));if(cs.length<2)continue;
+      const bx=new Set(cs.map(boxOf));
+      if(bx.size===1){const box=UNITS[BOX0+[...bx][0]];for(const q of box)if(!u.includes(q)&&val[q]===0&&(cand[q]&b)){cand[q]&=~b;did=true;}}}}
+    return did;}
+  function solveTier(puzzle,maxTier){const val=puzzle.slice();const cand=candsOf(val);
+    const place=(p,n)=>{val[p]=n;cand[p]=0;for(const q of PEERS[p])cand[q]&=~_bit(n);};
+    for(;;){const f=findFill(val,cand,maxTier>=3?3:maxTier);if(f){place(f.p,f.n);continue;}
+      if(maxTier>=4&&doLocked(val,cand))continue;break;}
+    return val.every(x=>x!==0);}
+  function nextHint(board){const val=board.slice();const cand=candsOf(val);
+    let f=findFill(val,cand,3);if(f)return{...f,needLocked:false};
+    for(let g=0;g<40;g++){if(!doLocked(val,cand))break;f=findFill(val,cand,3);if(f)return{...f,needLocked:true};}
+    return null;}
+  function generate(tier,floor,seedNum,strict){let last=null;
+    for(let attempt=0;attempt<80;attempt++){
+      const seed=(seedNum^Math.imul(attempt+1,0x9E3779B1))>>>0;const rng=mulberry32(seed);
+      const solution=new Array(CELLS).fill(0);solveFull(solution,rng);const puzzle=solution.slice();
+      const order=shuffle([...Array(CELLS).keys()],rng);let clues=CELLS;
+      for(const pos of order){if(clues<=floor)break;const bak=puzzle[pos];if(bak===0)continue;puzzle[pos]=0;
+        const test=puzzle.slice();
+        if(countSolutions(test,2)!==1||!solveTier(puzzle,tier)){puzzle[pos]=bak;}else{clues--;}}
+      last={puzzle,solution};
+      if(!strict||!solveTier(puzzle,tier-1))return {puzzle,solution};}
+    return last;}
+  return {N,bh,bw,generate,nextHint,solveTier};
 }
+const ENGINES={};
+function engineFor(size){return ENGINES[size]||(ENGINES[size]=makeEngine(size,SIZES[size][0],SIZES[size][1]));}
+// 對外包裝：依難度尺寸路由到對應引擎
+function generate(di,seedNum){const d=DIFFS[di];return engineFor(d.size).generate(d.tier,d.floor,seedNum,d.strict);}
+function nextHint(board){return engineFor(DIFFS[S.di].size).nextHint(board);}
 
 /* ============ 狀態 ============ */
 let S=null; // 目前遊戲
@@ -576,8 +549,9 @@ function startGame(di,level,mode,seedOverride,forceNew){
   setTimeout(()=>{
     const seed=mode==='infinite'?(seedOverride>>>0):levelSeed(di,level);
     const {puzzle,solution}=generate(di,seed);
-    S={di,level,mode,seed,puzzle,solution,
-       values:puzzle.slice(),notes:Array.from({length:81},()=>[]),
+    const N=DIFFS[di].size,[bh,bw]=SIZES[N];
+    S={di,level,mode,seed,puzzle,solution,N,bh,bw,
+       values:puzzle.slice(),notes:Array.from({length:N*N},()=>[]),
        sel:-1,mist:0,hints:0,elapsed:0,notesMode:false,done:false,history:[]};
     document.getElementById('loading').classList.remove('show');
     buildBoard();buildPad();refreshHeader();startTimer();updateTools();saveCurrent();
@@ -593,9 +567,18 @@ function restartGame(){
   else startGame(curDiff,0,'infinite',(Date.now()^Math.floor(Math.random()*1e9))>>>0);
 }
 function resumeGame(sv){
+  const N=DIFFS[sv.di]?DIFFS[sv.di].size:9;
+  // 舊版存檔尺寸不符（難度分級改過）→ 丟棄，改新開這一關，避免用錯尺寸盤面壞掉
+  if(!sv||!sv.puzzle||sv.puzzle.length!==N*N||typeof DIFFS[sv.di]==='undefined'){
+    if(sv&&sv.mode==='levels'){delete inProgress[lvKey(sv.di,sv.level)];persistIP();}
+    localStorage.removeItem(LS.cur);
+    startGame(sv&&typeof sv.di==='number'?sv.di:0, sv&&sv.level?sv.level:1, sv&&sv.mode==='infinite'?'infinite':'levels', sv&&sv.seed, true);
+    return;
+  }
   show('game');
   if(sv.mode==='levels')markLastPlayed(sv.di,sv.level);
-  S={di:sv.di,level:sv.level,mode:sv.mode,seed:sv.seed,puzzle:sv.puzzle,solution:sv.solution,
+  const [bh,bw]=SIZES[N];
+  S={di:sv.di,level:sv.level,mode:sv.mode,seed:sv.seed,puzzle:sv.puzzle,solution:sv.solution,N,bh,bw,
      values:sv.values,notes:sv.notes,sel:-1,mist:sv.mist,hints:sv.hints,elapsed:sv.elapsed,
      notesMode:false,done:false,history:[]};
   buildBoard();buildPad();refreshHeader();startTimer();updateTools();
@@ -615,26 +598,39 @@ function startTimer(){
   },1000);
 }
 
-/* ---- 棋盤 ---- */
+/* ---- 棋盤（尺寸相關只動結構：格數/宮線/字級縮放，顏色一律沿用現有變數） ---- */
 function buildBoard(){
   coachHide();
+  const N=S.N,bh=S.bh,bw=S.bw;
   const board=document.getElementById('board');board.innerHTML='';
-  for(let i=0;i<81;i++){
+  board.style.gridTemplateColumns=`repeat(${N},1fr)`;
+  board.style.gridTemplateRows=`repeat(${N},1fr)`;
+  board.style.setProperty('--cf',`min(${(57.6/N).toFixed(1)}vw, ${Math.round(306/N)}px)`); // 字級隨 N 縮放
+  for(let i=0;i<N*N;i++){
     const c=document.createElement('div');
-    c.className='cell';c.dataset.i=i;c.dataset.r=(i/9)|0;c.dataset.c=i%9;
+    const r=(i/N|0),col=i%N;
+    c.className='cell';c.dataset.i=i;
+    // 宮的粗線：在宮邊界的格子右/下加 --line-strong（沿用既有變數，非新視覺）
+    const sh=[];
+    if((col+1)%bw===0&&col<N-1)sh.push('inset -2px 0 0 var(--line-strong)');
+    if((r+1)%bh===0&&r<N-1)sh.push('inset 0 -2px 0 var(--line-strong)');
+    if(sh.length)c.style.boxShadow=sh.join(',');
     c.onclick=()=>selectCell(i);
     board.appendChild(c);
   }
   renderCells();
 }
 function renderCells(){
+  const N=S.N,bh=S.bh,bw=S.bw,boxCols=N/bw;
+  const boxOf=p=>Math.floor((p/N|0)/bh)*boxCols+Math.floor((p%N)/bw);
   const cells=document.getElementById('board').children;
   const selVal=S.sel>=0?S.values[S.sel]:0;
-  const selR=S.sel>=0?(S.sel/9|0):-1, selC=S.sel>=0?S.sel%9:-1;
-  const selB=S.sel>=0?((selR/3|0)*3+(selC/3|0)):-1;
-  for(let i=0;i<81;i++){
+  const selR=S.sel>=0?(S.sel/N|0):-1, selC=S.sel>=0?S.sel%N:-1;
+  const selB=S.sel>=0?boxOf(S.sel):-1;
+  const noteCols=N<=4?2:3;
+  for(let i=0;i<N*N;i++){
     const cell=cells[i];const v=S.values[i];const fixed=S.puzzle[i]!==0;
-    const r=(i/9|0),c=i%9,b=((r/3|0)*3+(c/3|0));
+    const r=(i/N|0),c=i%N,b=boxOf(i);
     let cls='cell';
     if(fixed)cls+=' fixed';
     if(S.hintCells&&S.hintCells.has(i))cls+=' hintv';
@@ -649,7 +645,8 @@ function renderCells(){
       cell.textContent='';
       if(S.notes[i]&&S.notes[i].length){
         const nb=document.createElement('div');nb.className='notes';
-        for(let n=1;n<=9;n++){const s=document.createElement('span');s.textContent=S.notes[i].includes(n)?n:'';nb.appendChild(s);}
+        nb.style.gridTemplateColumns=`repeat(${noteCols},1fr)`;
+        for(let n=1;n<=N;n++){const s=document.createElement('span');s.textContent=S.notes[i].includes(n)?n:'';nb.appendChild(s);}
         cell.appendChild(nb);
       }
     }
@@ -657,10 +654,11 @@ function renderCells(){
 }
 function selectCell(i){S.sel=i;renderCells();}
 
-/* ---- 數字盤 ---- */
+/* ---- 數字盤（1..N） ---- */
 function buildPad(){
-  const pad=document.getElementById('pad');pad.innerHTML='';
-  for(let n=1;n<=9;n++){
+  const N=S.N;const pad=document.getElementById('pad');pad.innerHTML='';
+  pad.style.gridTemplateColumns=`repeat(${N},1fr)`;
+  for(let n=1;n<=N;n++){
     const b=document.createElement('button');
     b.className='num';b.dataset.n=n;
     b.innerHTML=`${n}<span class="rem"></span>`;
@@ -670,12 +668,12 @@ function buildPad(){
   updatePad();
 }
 function updatePad(){
-  const counts=new Array(10).fill(0);
-  for(let i=0;i<81;i++)if(S.values[i])counts[S.values[i]]++;
+  const N=S.N;const counts=new Array(N+1).fill(0);
+  for(let i=0;i<N*N;i++)if(S.values[i])counts[S.values[i]]++;
   const pad=document.getElementById('pad').children;
-  for(let n=1;n<=9;n++){
-    pad[n-1].querySelector('.rem').textContent=Math.max(0,9-counts[n])||'';
-    pad[n-1].classList.toggle('done',counts[n]>=9);
+  for(let n=1;n<=N;n++){
+    pad[n-1].querySelector('.rem').textContent=Math.max(0,N-counts[n])||'';
+    pad[n-1].classList.toggle('done',counts[n]>=N);
   }
 }
 
@@ -730,17 +728,24 @@ function undo(){
 }
 function toggleNotes(){S.notesMode=!S.notesMode;updateTools();}
 /* ---- 教練式提示：指方向 → 講理由 → 指格＋答案（第0層先擋填錯）---- */
-function boxPos(p){return ['左','中','右'][(p%9/3|0)]+['上','中','下'][((p/9|0)/3|0)]+'宮';}
+function boxPos(p){const N=S.N,bh=S.bh,bw=S.bw;
+  const cn=(N/bw===2)?['左','右']:['左','中','右'];
+  const rn=(N/bh===2)?['上','下']:['上','中','下'];
+  return cn[Math.floor((p%N)/bw)]+rn[Math.floor((p/N|0)/bh)]+'宮';}
+// 該格所在「宮」的所有格（依當前尺寸算，供教練高亮）
+function boxCellsOf(p){const N=S.N,bh=S.bh,bw=S.bw;
+  const br=Math.floor((p/N|0)/bh)*bh,bc=Math.floor((p%N)/bw)*bw;
+  const a=[];for(let i=0;i<bh;i++)for(let j=0;j<bw;j++)a.push((br+i)*N+(bc+j));return a;}
 function describeUnit(h){
   if(!h.unit||h.unit.kind==='宮')return boxPos(h.p);
-  if(h.unit.kind==='列')return '第'+((h.p/9|0)+1)+'列（橫排）';
-  return '第'+(h.p%9+1)+'行（直排）';
+  if(h.unit.kind==='列')return '第'+((h.p/S.N|0)+1)+'列（橫排）';
+  return '第'+(h.p%S.N+1)+'行（直排）';
 }
 function coachSay(html,warn){const el=document.getElementById('coachBar');
   el.hidden=false;el.className='coach'+(warn?' warn':'');
   el.innerHTML='<span class="ic">'+(warn?'⚠️':'🧭')+'</span><span class="tx">'+html+'</span>';}
 function coachHide(){const el=document.getElementById('coachBar');if(el)el.hidden=true;if(S){S.coach=null;S.coachCells=null;}}
-function findWrong(){for(let i=0;i<81;i++)if(S.puzzle[i]===0&&S.values[i]!==0&&S.values[i]!==S.solution[i])return i;return -1;}
+function findWrong(){const T=S.N*S.N;for(let i=0;i<T;i++)if(S.puzzle[i]===0&&S.values[i]!==0&&S.values[i]!==S.solution[i])return i;return -1;}
 function hint(){
   if(S.done)return;
   // 第0層：盤面有填錯先擋，不給假線索
@@ -754,8 +759,8 @@ function hint(){
   const layer=(S.coach&&S.coach.key===key)?Math.min(3,S.coach.layer+1):1;
   S.coach={key,layer};
   const unit=describeUnit(h);
-  // 方向/理由層高亮整個「區域」（裸單元素→該格所在的宮），指格層才只亮那一格
-  const region=h.unit?h.unit.cells.slice():UNITS[18+((h.p/9|0)/3|0)*3+((h.p%9)/3|0)].slice();
+  // 方向/理由層高亮整個「區域」（裸單元素→該格所在的宮，依當前尺寸算），指格層才只亮那一格
+  const region=h.unit?h.unit.cells.slice():boxCellsOf(h.p);
   if(layer===1){
     S.coachCells=region;
     coachSay((h.needLocked?'這一步要先用「<b>區塊排除</b>」。先看看':'先看看')+'「<b>'+unit+'</b>」，答案就在這一區裡。');
@@ -856,15 +861,16 @@ function bind(){
   // 鍵盤（iPad 外接鍵盤 / 桌機測試）
   document.addEventListener('keydown',e=>{
     if(document.getElementById('game').classList.contains('active')&&S&&!S.done){
-      if(e.key>='1'&&e.key<='9')inputNumber(+e.key);
+      const N=S.N;
+      if(e.key>='1'&&e.key<=String(N))inputNumber(+e.key);
       else if(e.key==='Backspace'||e.key==='0'||e.key==='Delete')eraseCell();
       else if(e.key==='n'||e.key==='N')toggleNotes();
       else if(e.key==='h'||e.key==='H')hint();
       else if(e.key.startsWith('Arrow')&&S.sel>=0){
-        let r=(S.sel/9|0),c=S.sel%9;
-        if(e.key==='ArrowUp')r=(r+8)%9;if(e.key==='ArrowDown')r=(r+1)%9;
-        if(e.key==='ArrowLeft')c=(c+8)%9;if(e.key==='ArrowRight')c=(c+1)%9;
-        selectCell(r*9+c);e.preventDefault();
+        let r=(S.sel/N|0),c=S.sel%N;
+        if(e.key==='ArrowUp')r=(r+N-1)%N;if(e.key==='ArrowDown')r=(r+1)%N;
+        if(e.key==='ArrowLeft')c=(c+N-1)%N;if(e.key==='ArrowRight')c=(c+1)%N;
+        selectCell(r*N+c);e.preventDefault();
       }
     }
   });
