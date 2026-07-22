@@ -178,6 +178,15 @@ body{
 .spin{width:26px;height:26px;border:3px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:sp 0.7s linear infinite;}
 @keyframes sp{to{transform:rotate(360deg)}}
 .link{background:none;border:0;color:var(--muted);font-family:inherit;font-size:12px;cursor:pointer;text-decoration:underline;}
+.pcard{display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:12px;background:var(--pad);cursor:pointer;margin-bottom:8px;border:2px solid transparent;}
+.pcard.active{border-color:var(--accent);}
+.pcard .av{font-size:26px;line-height:1;}
+.pcard .nm{flex:1;font-weight:700;color:var(--ink);}
+.pcard .pact{background:none;border:0;font-size:15px;cursor:pointer;padding:5px;color:var(--muted);}
+.avgrid{display:grid;grid-template-columns:repeat(6,1fr);gap:6px;margin:10px 0;}
+.avgrid button{aspect-ratio:1;border:0;border-radius:10px;background:var(--pad);font-size:20px;cursor:pointer;border:2px solid transparent;}
+.avgrid button.sel{border-color:var(--accent);}
+.pname-in{width:100%;box-sizing:border-box;padding:10px;border-radius:10px;border:1px solid var(--line);background:var(--panel);color:var(--ink);font-family:inherit;font-size:15px;}
 </style>
 
 <div class="app">
@@ -186,6 +195,7 @@ body{
     <div class="brand">
       <div class="logo">數</div>
       <div><h1>小數獨<small>免費・無廣告・練習數字推理</small></h1></div>
+      <button class="iconbtn" id="profileBtn" style="margin-left:auto" title="玩家">👤</button>
     </div>
 
     <div class="section-title">選難度</div>
@@ -277,6 +287,24 @@ body{
       <button class="btn-ghost" id="resetProgress">重設進度</button>
       <button class="btn-fill" id="closeSettings">完成</button>
     </div>
+  </div>
+</div>
+
+<!-- PROFILES -->
+<div class="overlay" id="profileOverlay">
+  <div class="card" style="text-align:left">
+    <h2 style="text-align:center;margin-bottom:12px">玩家</h2>
+    <div id="profileList"></div>
+    <div id="addForm" hidden>
+      <input class="pname-in" id="pname" maxlength="8" placeholder="名字（最多 8 字）">
+      <div class="avgrid" id="avGrid"></div>
+      <div class="row">
+        <button class="btn-ghost" id="addCancel">取消</button>
+        <button class="btn-fill" id="addCreate">建立</button>
+      </div>
+    </div>
+    <button class="btn-ghost" id="addProfileBtn" style="width:100%;margin-top:6px">＋ 新增玩家</button>
+    <div style="text-align:center;margin-top:12px"><button class="link" id="profileClose">關閉</button></div>
   </div>
 </div>
 
@@ -852,6 +880,13 @@ function bind(){
   };
   // settings
   document.getElementById('openSettings').onclick=()=>{syncSwitches();document.getElementById('settingsOverlay').classList.add('show');};
+  document.getElementById('profileBtn').onclick=openProfiles;
+  document.getElementById('profileClose').onclick=closeProfiles;
+  document.getElementById('addProfileBtn').onclick=()=>{if(profilesData.list.length>=6)return;
+    addAvatar=AVATARS[profilesData.list.length%AVATARS.length];document.getElementById('pname').value='';renderAvGrid();document.getElementById('addForm').hidden=false;};
+  document.getElementById('addCancel').onclick=()=>{document.getElementById('addForm').hidden=true;};
+  document.getElementById('addCreate').onclick=()=>{const nm=document.getElementById('pname').value.trim()||('玩家 '+(profilesData.list.length+1));
+    const id=createProfile(nm,addAvatar);if(id){useProfile(id);document.getElementById('addForm').hidden=true;renderProfileList();refreshHomeForProfile();}};
   document.getElementById('closeSettings').onclick=()=>document.getElementById('settingsOverlay').classList.remove('show');
   const sw=(id,key)=>{document.getElementById(id).onclick=()=>{settings[key]=!settings[key];saveSettings();syncSwitches();if(S&&!S.done)renderCells(),refreshHeader();};};
   sw('swErr','showErr');sw('swAuto','autoNote');sw('swLimit','limitMist');
@@ -888,6 +923,39 @@ function syncSwitches(){
 }
 function goHome(){show('home');renderLevels();renderContinue();}
 
+/* ---- 玩家檔案 UI ---- */
+let addAvatar='🦊'; // ＝AVATARS[0]，用字面值避免在 AVATARS 宣告前引用（TDZ）
+function renderProfileBtn(){const ap=activeProfile();const b=document.getElementById('profileBtn');if(b)b.textContent=ap?ap.avatarStickerId:'👤';}
+function refreshHomeForProfile(){renderDiffs();renderLevels();renderContinue();renderProfileBtn();}
+function countProfileProgress(id){try{const p=JSON.parse(localStorage.getItem('sudoku.p.'+id+'.progress.v1'))||{};let n=0;for(const d in p)n+=Object.keys(p[d]).length;return n;}catch(e){return 0;}}
+function openProfiles(){document.getElementById('addForm').hidden=true;renderProfileList();document.getElementById('profileOverlay').classList.add('show');}
+function closeProfiles(){document.getElementById('profileOverlay').classList.remove('show');}
+function renderProfileList(){
+  const el=document.getElementById('profileList');el.innerHTML='';
+  profilesData.list.forEach(p=>{
+    const c=document.createElement('div');c.className='pcard'+(p.id===profilesData.activeId?' active':'');
+    const sw=()=>{if(p.id!==profilesData.activeId){useProfile(p.id);}closeProfiles();refreshHomeForProfile();};
+    const av=document.createElement('span');av.className='av';av.textContent=p.avatarStickerId;av.onclick=sw;
+    const nm=document.createElement('span');nm.className='nm';nm.textContent=p.name;nm.onclick=sw;
+    const ren=document.createElement('button');ren.className='pact';ren.textContent='✎';
+    ren.onclick=e=>{e.stopPropagation();const nn=prompt('改名字（最多 8 字）',p.name);if(nn!=null){renameProfile(p.id,nn.trim());renderProfileList();renderProfileBtn();}};
+    c.appendChild(av);c.appendChild(nm);c.appendChild(ren);
+    if(profilesData.list.length>1){const del=document.createElement('button');del.className='pact';del.textContent='🗑';
+      del.onclick=e=>{e.stopPropagation();const cnt=countProfileProgress(p.id);
+        if(confirm('確定刪除「'+p.name+'」？\n\n'+p.name+' 的 '+cnt+' 關進度會全部消失，無法復原。')
+          &&confirm('再確認一次：真的要刪掉「'+p.name+'」嗎？')){
+          deleteProfile(p.id);renderProfileList();refreshHomeForProfile();}};
+      c.appendChild(del);}
+    el.appendChild(c);
+  });
+  const ab=document.getElementById('addProfileBtn');
+  ab.disabled=profilesData.list.length>=6;
+  ab.textContent=profilesData.list.length>=6?'已達 6 個上限':'＋ 新增玩家';
+}
+function renderAvGrid(){const g=document.getElementById('avGrid');g.innerHTML='';
+  AVATARS.forEach(a=>{const b=document.createElement('button');b.textContent=a;if(a===addAvatar)b.className='sel';
+    b.onclick=()=>{addAvatar=a;renderAvGrid();};g.appendChild(b);});}
+
 /* ---- 一次性遷移：多尺寸(v9)把難度由 4→6 rungs 造成舊 di 位移，
    把舊 di 0→2 / 1→3 / 2→4 / 3→5 重映射（舊 簡單/中等/困難/專家 → 新對應階梯）。
    remap 前整包備份到 .bak.dimigrate（回滾保險）；只跑一次。 ---- */
@@ -909,9 +977,49 @@ function migrateDiIndices(){
   localStorage.setItem('sudoku.dimigrated.v1','1');
 }
 
+/* ============ 玩家檔案（profiles）資料層 ============ */
+const PROFILES_KEY='sudoku.profiles.v1';
+const PSUFFIX={prog:'progress.v1',cur:'current.v1',set:'settings.v1',ip:'inprogress.v1',last:'lastplayed.v1'};
+const GLOBAL_KEYS={prog:'sudoku.progress.v1',cur:'sudoku.current.v1',set:'sudoku.settings.v1',ip:'sudoku.inprogress.v1',last:'sudoku.lastplayed.v1'};
+const AVATARS=['🦊','🐰','🐼','🐨','🦁','🐸','🐢','🦉','🐙','🦋','🐝','🐬']; // 動物/自然，溫暖不幼稚
+const DEF_SETTINGS={showErr:true,autoNote:true,limitMist:false};
+let profilesData={list:[],activeId:null};
+function loadProfiles(){try{const p=JSON.parse(localStorage.getItem(PROFILES_KEY));if(p&&Array.isArray(p.list))profilesData=p;}catch(e){}}
+function saveProfiles(){localStorage.setItem(PROFILES_KEY,JSON.stringify(profilesData));}
+function activeProfile(){return profilesData.list.find(p=>p.id===profilesData.activeId)||profilesData.list[0]||null;}
+function setActiveKeys(){const ap=activeProfile();if(!ap)return;profilesData.activeId=ap.id;for(const k in PSUFFIX)LS[k]='sudoku.p.'+ap.id+'.'+PSUFFIX[k];}
+function newProfileId(){return 'p'+Date.now().toString(36)+Math.floor(Math.random()*1e4).toString(36);}
+// 一次性遷移：把現有全域 key 複製進「玩家 1」命名空間（全域 key 原位保留＝回滾保險）
+function migrateToProfiles(){
+  loadProfiles();
+  if(profilesData.list.length)return;
+  const now=Date.now(),id=newProfileId();
+  profilesData={list:[{id,name:'玩家 1',avatarStickerId:AVATARS[0],createdAt:now,lastActiveAt:now}],activeId:id};
+  for(const k in PSUFFIX){const v=localStorage.getItem(GLOBAL_KEYS[k]);if(v!=null)localStorage.setItem('sudoku.p.'+id+'.'+PSUFFIX[k],v);}
+  saveProfiles();localStorage.setItem('sudoku.migrated.v1','1');
+}
+// 重載當前檔案資料進記憶體＋重置暫態
+function reloadActive(){progress={};inProgress={};shownByDiff={};curDiff=0;settings={...DEF_SETTINGS};loadStore();}
+function useProfile(id){const ap=profilesData.list.find(p=>p.id===id);if(!ap)return;
+  profilesData.activeId=id;ap.lastActiveAt=Date.now();saveProfiles();setActiveKeys();reloadActive();}
+function createProfile(name,avatar){if(profilesData.list.length>=6)return null;const now=Date.now(),id=newProfileId();
+  profilesData.list.push({id,name:(name||'玩家').slice(0,8),avatarStickerId:avatar||AVATARS[profilesData.list.length%AVATARS.length],createdAt:now,lastActiveAt:now});
+  saveProfiles();return id;}
+function renameProfile(id,name){const p=profilesData.list.find(x=>x.id===id);if(p){p.name=(name||p.name).slice(0,8)||p.name;saveProfiles();}}
+function deleteProfile(id){
+  for(const k in PSUFFIX)localStorage.removeItem('sudoku.p.'+id+'.'+PSUFFIX[k]);
+  profilesData.list=profilesData.list.filter(p=>p.id!==id);
+  if(profilesData.activeId===id)profilesData.activeId=profilesData.list[0]?profilesData.list[0].id:null;
+  saveProfiles();
+  if(profilesData.list.length){setActiveKeys();reloadActive();}
+}
+
 /* ============ 啟動 ============ */
-migrateDiIndices();loadStore();bind();
+migrateDiIndices();      // 舊全域 key 的難度位移修正（在全域 key 上）
+migrateToProfiles();     // 建預設檔案、複製全域 key 進命名空間
+setActiveKeys();         // LS.* 指向當前檔案命名空間
+loadStore();bind();
 {const _ct=continueTarget();if(_ct&&_ct.mode!=='infinite'&&typeof _ct.di==='number')curDiff=_ct.di;}
-renderDiffs();renderLevels();renderContinue();
+renderDiffs();renderLevels();renderContinue();renderProfileBtn();
 if('serviceWorker'in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));}
 </script>
